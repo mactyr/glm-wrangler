@@ -22,7 +22,7 @@ require 'pry'
 
 version_pieces = RUBY_VERSION.split '.'
 unless version_pieces[0] == '1' && version_pieces[1] == '9'
-  raise "This script was written for use with ruby 1.9; in particular, it relies on Hash being ordered to avoid messing up your .glm too badly.  You can erase this check from the script and use with other versions at your own risk."
+  raise "This script was written for use with ruby 1.9; in particular, it relies on Hash being ordered to avoid reordering the properties of your .glm objects.  You can erase this check from the script and use with other versions at your own risk."
 end
 
 class GLMWrangler
@@ -68,6 +68,12 @@ class GLMWrangler
       @indexes[prop][obj[prop]] << obj if obj[prop]
     end
     obj.nested.each {|n_obj| index_obj n_obj}
+  end
+  
+  # put a line after all other comments at the top of the .glm that notes that
+  # how the .glm was wrangled
+  def sign
+    
   end
   
   # write out a DOT file based on the parsed objects
