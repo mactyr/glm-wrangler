@@ -62,7 +62,7 @@ class GLMWrangler
     infile.close
   end
   
-  # recursively add a GLMObject to 
+  # recursively add a GLMObject to all the indexes we're creating
   def index_obj(obj)
     INDEX_PROPS.each do |prop|
       @indexes[prop][obj[prop]] << obj if obj[prop]
@@ -75,21 +75,6 @@ class GLMWrangler
     outfile = File.open @outfilename, 'w'
     @lines.each {|l| outfile.puts l }
     outfile.close
-  end
-  
-  def derate_residential_xfmrs(factor)
-    find_by_class('transformer_configuration').each do |t|
-      if t[:connect_type] == 'SINGLE_PHASE_CENTER_TAPPED'
-        (PHASES + ['']).each do |phase|
-          prop = "power#{phase}_rating".to_sym
-          if val = t[prop]
-            words = val.split
-            words[0] = (words[0].to_f * factor).to_s
-            t[prop] = words.join ' '
-          end
-        end
-      end
-    end 
   end
   
   def method_missing(meth, *args, &block)
@@ -105,6 +90,23 @@ class GLMWrangler
             # method, otherwise you'll mess up Ruby's method
             # lookup.
     end
+  end
+  
+  # GLMWrangler methods below perform tasks that are intended to be called from
+  # the command line
+  def derate_residential_xfmrs(factor)
+    find_by_class('transformer_configuration').each do |t|
+      if t[:connect_type] == 'SINGLE_PHASE_CENTER_TAPPED'
+        (PHASES + ['']).each do |phase|
+          prop = "power#{phase}_rating".to_sym
+          if val = t[prop]
+            words = val.split
+            words[0] = (words[0].to_f * factor).to_s
+            t[prop] = words.join ' '
+          end
+        end
+      end
+    end 
   end
 
 end
@@ -242,7 +244,6 @@ class GLMObject < Hash
   end
   
 end
-
 
 # Main execution of the script.  Just grabs the parameters and tells
 # GLMWrangler to do its thing
