@@ -179,6 +179,7 @@ class GLMObject < Hash
     @nested = []
     @wrangler = wrangler
     @nesting_parent = nesting_parent
+    @trailing_junk = {}
     props.each {|key, val| self[key] = val}
   end
   
@@ -217,8 +218,12 @@ class GLMObject < Hash
       when /^([\w.]+)\s+([^;]+);(.*)$/
         # note: there will be trouble here if a property is set to a quoted
         # string that contains a ';'
-        self[$1.to_sym] = $2
-        puts "Ignoring extra stuff after semicolon in: '#{l}'" unless $3.empty?
+        key = $1.to_sym
+        self[key] = $2
+        # Preserve any non-whitespace that appeared on this line after the
+        # semicolon. There's no facility for editing this trailing junk,
+        # it's just preserved.
+        @trailing_junk[key] = $3 unless $3.empty?
       else
         raise "Object property parser hit a line it doesn't understand: '#{l}'"
       end
@@ -245,7 +250,7 @@ class GLMObject < Hash
       when 'class', 'id'
         '' # these are used only in the object declaration line
       else
-        tab(indent + 1) + prop_s + ' ' + val + "; \n"
+        tab(indent + 1) + prop_s + ' ' + val + ";#{@trailing_junk[key]} \n"
       end
     end
     out + tab(indent) + '}' + (@semicolon ? ';' : '') + "\n"
