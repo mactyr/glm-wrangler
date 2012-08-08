@@ -64,7 +64,7 @@ class GLMWrangler
     
     while l = infile.gets do    
       if l =~ OBJ_REGEX   
-        obj = GLMObject.new(l, infile, self)
+        obj = GLMObject.from_file l, infile, self
         @lines << obj
         index_obj obj
       else
@@ -162,20 +162,34 @@ class GLMObject < Hash
   
   attr_reader :nested
   
-  def initialize(dec_line, infile, wrangler, nesting_parent = nil)
-    obj_count = comment_count = blank_count = 0
-    done = false
+  def self.from_file(dec_line, infile, wrangler, nesting_parent = nil)
+    obj = new wrangler, {}, nesting_parent
+    obj.populate_from_file dec_line, infile
+  end
+  
+  def initialize(wrangler, props = {}, nesting_parent = nil)
     # Is there a semicolon after the closing '}' for this object?
     # Defaults to true because having a semicolon is always safe
-    # but we try to remember if the original file doesn't use one
-    # and do the same.  Note that this could cause problems if you
-    # move the object from a place in the tree where it doesn't
+    # but we try to remember in populate_from_file if the original file
+    # doesn't use one and do the same.  Note that this could cause problems if
+    # you move the object from a place in the tree where it doesn't
     # need a semicolon (i.e. at the top layer) to a place where it does
     # (i.e. inside another object)
     @semicolon = true
     @nested = []
     @wrangler = wrangler
     @nesting_parent = nesting_parent
+    props.each {|key, val| self[key] = val}
+  end
+  
+  # populates this object, declared by dec_line (which is assumed to have just
+  # been read from infile) with properties that follow in infile, until
+  # the end of the object definition is found.  Also recursively creates
+  # more GLMObjects if nested objects are found
+  def populate_from_file(dec_line, infile)
+    obj_count = comment_count = blank_count = 0
+    done = false
+    
     if /^\s*(\w+\s+)?object\s+(\w+)\s+{/.match(dec_line) && !$2.nil?
       self[:class] = $2
       self[:id] = $1.strip unless $1.nil? # this will usually be nil, but some objects are named
@@ -196,7 +210,7 @@ class GLMObject < Hash
         self[('comment' + comment_count.to_s).to_sym] = l
         comment_count += 1
       when GLMWrangler::OBJ_REGEX
-        obj = GLMObject.new(l, infile, wrangler, self)
+        obj = GLMObject.from_file(l, infile, @wrangler, self)
         self[('object' + obj_count.to_s).to_sym] = obj
         @nested << obj
         obj_count += 1
@@ -209,6 +223,7 @@ class GLMObject < Hash
         raise "Object property parser hit a line it doesn't understand: '#{l}'"
       end
     end
+    self
   end
   
   def comment?; false end
