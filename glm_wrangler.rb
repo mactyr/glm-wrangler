@@ -25,15 +25,32 @@ unless version_pieces[0] == '1' && version_pieces[1] == '9'
   raise "This script was written for use with ruby 1.9; in particular, it relies on Hash being ordered to avoid reordering the properties of your .glm objects.  You can erase this check from the script and use with other versions at your own risk."
 end
 
+class Object
+  def blank?
+    respond_to?(:empty?) ? empty? : !self
+  end
+end
+
+class String
+  def blank?
+    self !~ /\S/
+  end
+  
+  def comment?
+    self =~ /^\s*\/\//
+  end
+end
+
 class GLMWrangler
   VERSION = '0.1'.freeze
   OBJ_REGEX = /(^|\s+)object\s+/
   INDEX_PROPS = [:name, :class, :parent, :from, :to]
   PHASES = %w[A B C]
   
-  def initialize(infilename, outfilename)
+  def initialize(infilename, outfilename, commands = nil)
     @infilename = infilename
     @outfilename = outfilename
+    @commands = commands
     @lines = []
     @indexes = {}
     INDEX_PROPS.each do |prop|
@@ -70,10 +87,26 @@ class GLMWrangler
     obj.nested.each {|n_obj| index_obj n_obj}
   end
   
+  def run
+    if @commands.blank?
+      puts "No commands given on command line; entering interactive mode."
+      interactive
+    else
+      @commands.each do |cmd|
+        puts "Executing command: #{cmd}"
+        instance_eval cmd
+      end
+    end
+  end
+  
   # put a line after all other comments at the top of the .glm that notes that
   # how the .glm was wrangled
   def sign
-    
+    first_content_i = @lines.index {|l| !l.blank? && !l.comment?}
+    raise "Couldn't find any non-blank, non-comment lines in the .glm" if first_content_i.nil?
+    signature = "// Wrangled by GLMWrangler #{VERSION} from #{@infilename} to #{@outfilename} by #{ENV['USERNAME'] || ENV['USER']} at #{Time.now.getlocal}"
+    commands = '// Wrangler commands: ' + (@commands.blank? ? '[no commands - defaulted to interactive session]' : @commands.join(' '))
+    @lines.insert first_content_i, signature, commands, ''
   end
   
   # write out a DOT file based on the parsed objects
@@ -100,6 +133,10 @@ class GLMWrangler
   
   # GLMWrangler methods below perform tasks that are intended to be called from
   # the command line
+  def interactive
+    pry
+  end
+  
   def derate_residential_xfmrs(factor)
     find_by_class('transformer_configuration').each do |t|
       if t[:connect_type] == 'SINGLE_PHASE_CENTER_TAPPED'
@@ -152,7 +189,7 @@ class GLMObject < Hash
       when /^\}/
         done = true
         @semicolon = l[-1] == ';'
-      when /^$/
+      when ''
         self[('blank' + blank_count.to_s).to_sym] = ''
         blank_count += 1
       when /^\/\//
@@ -173,6 +210,8 @@ class GLMObject < Hash
       end
     end
   end
+  
+  def comment?; false end
   
   def tab(level)
     TAB * level
@@ -253,10 +292,11 @@ end
 
 # Main execution of the script.  Just grabs the parameters and tells
 # GLMWrangler to do its thing
-infilename = ARGV[0]
-outfilename = ARGV[1]
+infilename = ARGV.shift
+outfilename = ARGV.shift
 
-wrangler = GLMWrangler.new infilename, outfilename
+wrangler = GLMWrangler.new infilename, outfilename, ARGV
 wrangler.parse
-wrangler.pry
+wrangler.run
+wrangler.sign
 wrangler.write
