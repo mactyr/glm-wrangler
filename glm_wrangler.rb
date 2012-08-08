@@ -69,7 +69,7 @@ class GLMWrangler
         index_obj obj
       else
         # For now anything that isn't inside an object declaration just gets
-        # saved as a literal string.  We could get fancy and create classe for
+        # saved as a literal string.  We could get fancy and create classes for
         # comments, module declarations, etc. if we wanted to be able to
         # edit those in the object model.
         @lines << l
@@ -151,7 +151,68 @@ class GLMWrangler
       end
     end 
   end
+  
+  # Add Solar City generation profiles to the desired load_type until the
+  # specified penetration fraction is reached.  peak_load is expected in kW.
+  # Also add the players necessary to support each profile that's used.
+  def add_sc_solar(peak_load, penetration, load_type = :residential)
+    rng = Random.new 1
+    
+    # dummy solar profiles.  The key is the installation number and the value
+    # is the rating in kW
+    capacities = {1 => 3, 2 => 3.5, 3 => 4}
 
+    # Grab all possible target objects and shuffle them
+    targets = case load_type
+    when :residential
+      # this isn't really right as there are "houses" simulating commercial load
+      # need some other way to distinguish
+      find_by_class 'house'
+    else
+      raise "Invalid load type"
+    end
+    targets.shuffle!(random: rng)
+
+    # Place solar until we hit the desired penetration, and build players for
+    # all the profiles we use.  Note that we may overshoot the desired
+    # penetration by a fraction of an installation -- we don't try to match it
+    # exactly
+    placed = 0
+    players = {}
+    until placed >= peak_load * penetration do
+      target = targets.shift
+      raise "Ran out of targets to add solar to" if target.nil?
+      # TODO: the profile chosen needs to be geographically determined, not randomized
+      profile = capacities.keys[rng.rand(capacities.size)]
+      target.add_nested({
+        :class => "ZIPload",
+        :comment0 => "// Solar City PV generation rated at #{'%.1f' % capacities[profile]}kW",
+        :groupid => "SC_res_zipload_solar",
+        :base_power => "sc_gen_#{profile}.value",
+        :heatgain_fraction => '0.0',
+        :power_pf => '1.0',
+        :current_pf => '1.0',
+        :impedance_pf => '1.0',
+        :impedance_fraction => '0.0',
+        :current_fraction => '0.0',
+        :power_fraction => '1.0'
+      })
+      placed += capacities[profile]
+      
+      unless players[profile]
+        player_props = {
+          :class => 'player',
+          :name => "sc_gen_#{profile}",
+          :file => "sc_gen_#{profile}.player"
+        }
+        players[profile] = GLMObject.new(self, player_props)
+      end
+    end
+    
+    # insert the generated player objects after the last climate object in the file
+    player_i = @lines.index(find_by_class('climate').last) + 1
+    @lines.insert player_i, '', *players.values
+  end
 end
 
 # base class for any object we care about in a .glm file
@@ -188,7 +249,7 @@ class GLMObject < Hash
   # the end of the object definition is found.  Also recursively creates
   # more GLMObjects if nested objects are found
   def populate_from_file(dec_line, infile)
-    obj_count = comment_count = blank_count = 0
+    comment_count = blank_count = 0
     done = false
     
     if /^\s*(\w+\s+)?object\s+(\w+)\s+{/.match(dec_line) && !$2.nil?
@@ -211,10 +272,7 @@ class GLMObject < Hash
         self[('comment' + comment_count.to_s).to_sym] = l
         comment_count += 1
       when GLMWrangler::OBJ_REGEX
-        obj = GLMObject.from_file(l, infile, @wrangler, self)
-        self[('object' + obj_count.to_s).to_sym] = obj
-        @nested << obj
-        obj_count += 1
+        push_nested self.class.from_file(l, infile, @wrangler, self)
       when /^([\w.]+)\s+([^;]+);(.*)$/
         # note: there will be trouble here if a property is set to a quoted
         # string that contains a ';'
@@ -233,11 +291,16 @@ class GLMObject < Hash
   
   def comment?; false end
   
+  def add_nested(props)
+    push_nested self.class.new(@wrangler, props, self)
+  end
+  
   def tab(level)
     TAB * level
   end
   
   def to_s(indent = 0)
+    raise "Can't convert a GLMObject with no :class to a string" if self[:class].nil?
     id_s = self[:id] ? self[:id] + ' ' : ''
     out = tab(indent) + id_s + 'object ' + self[:class] + " {\n"
     each do |key, val|
@@ -306,6 +369,14 @@ class GLMObject < Hash
       end
     end
     result
+  end
+  
+  private
+  
+  def push_nested(obj)
+    self[('object' + @nested.length.to_s).to_sym] = obj
+    @nested << obj
+    obj
   end
   
 end
