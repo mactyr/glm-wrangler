@@ -152,6 +152,13 @@ class GLMWrangler
     pry
   end
 
+  # Remove billdumps added by Feeder_Generator.m
+  # Note that we are only bothering to remove billdumps in the top layer
+  # of the hierarchy, because that's where Feeder_Generator.m puts them.
+  def remove_billdumps
+    @lines.reject! {|l| l.is_a?(GLMObject) && l[:class] == 'billdump'}
+  end
+
   def derate_residential_xfmrs(factor)
     find_by_class('transformer_configuration').each do |t|
       if t[:connect_type] == 'SINGLE_PHASE_CENTER_TAPPED'
