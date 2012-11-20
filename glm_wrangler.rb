@@ -34,6 +34,7 @@
 #   original you should use 'diff -b' which ignores whitespace changes.
 
 require 'pry'
+require 'csv'
 
 version_pieces = RUBY_VERSION.split '.'
 unless version_pieces[0] == '1' && version_pieces[1] == '9'
@@ -61,6 +62,7 @@ class GLMWrangler
   OBJ_REGEX = /(^|\s+)object\s+/
   INDEX_PROPS = [:name, :class, :parent, :from, :to]
   PHASES = %w[A B C]
+  DATA_DIR = 'data/'
   
   def initialize(infilename, outfilename, commands = nil)
     @infilename = infilename
@@ -177,40 +179,61 @@ class GLMWrangler
   # Add Solar City generation profiles to the desired load_type until the
   # specified penetration fraction is reached.  peak_load is expected in kW.
   # Also add the players necessary to support each profile that's used.
-  def add_sc_solar(peak_load, penetration, load_type = :residential)
-    rng = Random.new 1
-    
-    # dummy solar profiles.  The key is the installation number and the value
-    # is the rating in kW
-    capacities = {1 => 3, 2 => 3.5, 3 => 4}
+  def add_sc_solar(peak_load, penetration)
+
+    # load installation capacity values from a .csv
+    # in the hash, the key is the InverterID and the value is the rated capacity in kW
+    capacities = {}
+    CSV.foreach(DATA_DIR + 'inverter_capacities.csv', :headers => true) do |row|
+      capacities[row['SGInverter'].to_i] = row['InvCapEst'].to_f
+    end
 
     # Grab all possible target objects and shuffle them
-    targets = case load_type
-    when :residential
-      # this isn't really right as there are "houses" simulating commercial load
-      # need some other way to distinguish
-      find_by_class 'house'
-    else
-      raise "Invalid load type"
-    end
-    targets.shuffle!(random: rng)
+    # Currently, "targets" just means "houses" because the taxonomy models
+    # simulate commercial loads with houses.
+    # Note that we use a random number generator with a fixed seed
+    # so we get the same order of placement each time for any given feeder
+    rng = Random.new(1)
+    targets = find_by_class('house').shuffle(random: rng)
 
     # Place solar until we hit the desired penetration, and build players for
     # all the profiles we use.  Note that we may overshoot the desired
     # penetration by a fraction of an installation -- we don't try to match it
     # exactly
-    placed = 0
+    placed = Hash.new 0
     players = {}
-    until placed >= peak_load * penetration do
+    until placed[:res] + placed[:comm] >= peak_load * penetration do
       target = targets.shift
       raise "Ran out of targets to add solar to" if target.nil?
       # TODO: the profile chosen needs to be geographically determined, not randomized
       profile = capacities.keys[rng.rand(capacities.size)]
+      profile_cap = capacities[profile]
+
+      comment = "// Solar City PV generation rated at "
+      base_power = "sc_gen_#{profile}.value"
+
+      # Scale up profile if we're installing on a commercial building
+      # TODO: Do we need to scale down if we have a "big" profile on a residential home?
+      scale = nil
+      if target[:groupid] = 'Commercial'
+        # This is borrowed from PNNL's Feeder_Generator.m
+        # The idea is that a reasonable guess for a rating for a commercial system
+        # is its area times 0.2 efficiency times 92.902W/sf peak insolation
+        potential_cap = target[:floor_area].to_i * 0.2 * 92.902 / 1000
+        scale = (potential_cap / profile_cap).round(2)
+        comment += "#{'%.1f' % potential_cap}kW (scaled up from #{'%.1f' % profile_cap}kW)"
+        base_power += "*#{scale}"
+        placed[:comm] += potential_cap
+      else
+        comment += "#{'%.1f' % profile_cap}kW"
+        placed[:res] += profile_cap
+      end
+
       target.add_nested({
         :class => "ZIPload",
-        :comment0 => "// Solar City PV generation rated at #{'%.1f' % capacities[profile]}kW",
+        :comment0 => comment,
         :groupid => "SC_res_zipload_solar",
-        :base_power => "sc_gen_#{profile}.value",
+        :base_power => base_power,
         :heatgain_fraction => '0.0',
         :power_pf => '1.0',
         :current_pf => '1.0',
@@ -219,7 +242,6 @@ class GLMWrangler
         :current_fraction => '0.0',
         :power_fraction => '1.0'
       })
-      placed += capacities[profile]
       
       unless players[profile]
         player_props = {
@@ -234,6 +256,12 @@ class GLMWrangler
     # insert the generated player objects after the last climate object in the file
     player_i = @lines.index(find_by_class('climate').last) + 1
     @lines.insert player_i, '', *players.values
+
+    # log how much solar was added at the end of the file
+    @lines << ''
+    @lines << "// glm_wrangler.rb's add_sc_solar method added #{'%.1f' % placed[:res]}kW of residential solar"
+    @lines << "// and #{'%.1f' % placed[:comm]}kW of commercial solar for a total of #{'%.1f' % (placed[:res] + placed[:comm])}kW"
+    @lines << "// to reach a target penetration of #{'%.1f' % (penetration * 100)}% against a peak load of #{'%.1f' % peak_load}kW"
   end
 end
 
