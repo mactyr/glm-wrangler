@@ -232,7 +232,7 @@ class GLMWrangler
       target.add_nested({
         :class => "ZIPload",
         :comment0 => comment,
-        :groupid => "SC_res_zipload_solar",
+        :groupid => "SC_zipload_solar",
         :base_power => base_power,
         :heatgain_fraction => '0.0',
         :power_pf => '1.0',
