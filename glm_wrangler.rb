@@ -121,9 +121,10 @@ class GLMWrangler
   def sign
     first_content_i = @lines.index {|l| !l.blank? && !l.comment?}
     raise "Couldn't find any non-blank, non-comment lines in the .glm" if first_content_i.nil?
-    signature = "// Wrangled by GLMWrangler #{VERSION} from #{@infilename} to #{@outfilename} by #{ENV['USERNAME'] || ENV['USER']} at #{Time.now.getlocal}"
+    signature1 = "// Wrangled by GLMWrangler #{VERSION} from #{@infilename} to #{@outfilename}"
+    signature2 = "// by #{ENV['USERNAME'] || ENV['USER']} at #{Time.now.getlocal}"
     commands = '// Wrangler commands: ' + (@commands.blank? ? '[no commands - defaulted to interactive session]' : @commands.join(' '))
-    @lines.insert first_content_i, signature, commands, ''
+    @lines.insert first_content_i, signature1, signature2, commands, ''
   end
   
   # write out a DOT file based on the parsed objects
