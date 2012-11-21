@@ -35,6 +35,7 @@
 
 require 'pry'
 require 'csv'
+require 'debugger'
 
 version_pieces = RUBY_VERSION.split '.'
 unless version_pieces[0] == '1' && version_pieces[1] == '9'
@@ -162,6 +163,28 @@ class GLMWrangler
     @lines.reject! {|l| l.is_a?(GLMObject) && l[:class] == 'billdump'}
   end
 
+  def full_year_clock
+    # Unfortunately clock is not an object in GridLAB-D so we can't do this the easy way,
+    # but it's not too bad with @lines
+    found_tz = found_start = found_stop = success = false
+    @lines.each_with_index do |l, i|
+      case l
+      when /^\s*timezone PST\+8PDT;/
+        # we're not changing the timezone here, just checking that it's what we expect
+        found_tz = true
+      when /^(\s*starttime )/
+        @lines[i] = $1 + "'2011-09-25 00:00:00'"
+        found_start = true
+      when /^(\s*stoptime )/
+        @lines[i] = $1 + "'2012-09-24 23:59:59'"
+        found_stop = true
+      end
+      success = found_tz && found_start && found_stop
+      break if success
+    end
+    raise "Failed to verify/update all clock settings" unless success
+  end
+
   def use_custom_weather(region)
     region.downcase!
     loc = nil
@@ -191,6 +214,9 @@ class GLMWrangler
     reader = GLMObject.new(self, {class: 'csv_reader',
                                   name: climate[:reader],
                                   filename: climate[:tmyfile]})
+    # On second thought, it might be better to store the location and timezone properties
+    # in the .csv itself using csv_reader's $property_name=property_value syntax,
+    # but this works for now.
     loc.each {|key, val| reader[key] = val unless :region == key}
     reader[:timezone] = 'PST'
     @lines.insert(climate_i, reader, '')
