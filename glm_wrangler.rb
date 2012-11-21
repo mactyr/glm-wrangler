@@ -192,6 +192,7 @@ class GLMWrangler
                                   name: climate[:reader],
                                   filename: climate[:tmyfile]})
     loc.each {|key, val| reader[key] = val unless :region == key}
+    reader[:timezone] = 'PST'
     @lines.insert(climate_i, reader, '')
   end
 
