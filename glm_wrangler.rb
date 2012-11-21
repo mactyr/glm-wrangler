@@ -168,8 +168,8 @@ class GLMWrangler
     
     # Get the location metadata for the weather region from .csv,
     # and complain if it can't be found
-    CSV.foreach(DATA_DIR + 'weather_locations.csv', :headers => true) do |row|
-      if row['region'].downcase == region
+    CSV.foreach(DATA_DIR + 'weather_locations.csv', headers: true, header_converters: :symbol) do |row|
+      if row[:region].downcase == region
         loc = row
         break
       end
@@ -181,14 +181,17 @@ class GLMWrangler
     climate = climates.first
     climate_i = @lines.index climate
 
+    # Update the climate object
     climate[:name] = "\"CA-#{region.capitalize}\""
     climate[:tmyfile] = "#{region}_weather_full_year.csv"
     climate[:reader] = "#{region}_csv_reader"
     climate.delete :interpolate
 
+    # Create the csv_reader object, add the location metadata to it, and insert it into the .glm
     reader = GLMObject.new(self, {class: 'csv_reader',
                                   name: climate[:reader],
                                   filename: climate[:tmyfile]})
+    loc.each {|key, val| reader[key] = val unless :region == key}
     @lines.insert(climate_i, reader, '')
   end
 
