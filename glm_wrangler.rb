@@ -162,6 +162,36 @@ class GLMWrangler
     @lines.reject! {|l| l.is_a?(GLMObject) && l[:class] == 'billdump'}
   end
 
+  def use_custom_weather(region)
+    region.downcase!
+    loc = nil
+    
+    # Get the location metadata for the weather region from .csv,
+    # and complain if it can't be found
+    CSV.foreach(DATA_DIR + 'weather_locations.csv', :headers => true) do |row|
+      if row['region'].downcase == region
+        loc = row
+        break
+      end
+    end
+    raise "Can't find location data for region #{region}" if loc.nil?
+
+    climates = find_by_class 'climate'
+    raise "I need exactly one climate object" if climates.length != 1
+    climate = climates.first
+    climate_i = @lines.index climate
+
+    climate[:name] = "\"CA-#{region.capitalize}\""
+    climate[:tmyfile] = "#{region}_weather_full_year.csv"
+    climate[:reader] = "#{region}_csv_reader"
+    climate.delete :interpolate
+
+    reader = GLMObject.new(self, {class: 'csv_reader',
+                                  name: climate[:reader],
+                                  filename: climate[:tmyfile]})
+    @lines.insert(climate_i, reader, '')
+  end
+
   def derate_residential_xfmrs(factor)
     find_by_class('transformer_configuration').each do |t|
       if t[:connect_type] == 'SINGLE_PHASE_CENTER_TAPPED'
