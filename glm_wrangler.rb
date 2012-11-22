@@ -156,11 +156,25 @@ class GLMWrangler
     pry
   end
 
-  # Remove billdumps added by Feeder_Generator.m
-  # Note that we are only bothering to remove billdumps in the top layer
-  # of the hierarchy, because that's where Feeder_Generator.m puts them.
-  def remove_billdumps
-    @lines.reject! {|l| l.is_a?(GLMObject) && l[:class] == 'billdump'}
+  # Remove objects from the top layer of the .glm that belong to a class
+  # in the class_list.  Useful for removing billdumps, etc.
+  def remove_classes_from_top_layer(*class_list)
+    @lines.reject! {|l| l.is_a?(GLMObject) && class_list.include?(l[:class])}
+  end
+
+  def remove_service_status_players
+    players = find_by_class 'player'
+    players.each {|p| @lines.delete(p) if p[:property] == 'service_status'}
+  end
+
+  def remove_extra_blanks_from_top_layer
+    dupe = []
+    @lines.each_index do |i|
+      unless @lines[i].blank? && @lines[i-1].blank?
+        dupe << @lines[i]
+      end
+    end
+    @lines = dupe
   end
 
   def full_year_clock
@@ -220,6 +234,49 @@ class GLMWrangler
     loc.each {|key, val| reader[key] = val unless :region == key}
     reader[:timezone] = 'PST'
     @lines.insert(climate_i, reader, '')
+  end
+
+  # set up recorders/collectors/etc for our baseline run
+  def baseline_recorders(region)
+    sub_rec = find_by_class('recorder').first
+    raise "Substation recorder wasn't where I expected" unless sub_rec[:parent] == 'substation_transformer'
+    rec_i = @lines.index(sub_rec)
+
+    # base any recorders we add off of the substation recorder
+    file_base = sub_rec[:file][0, 13].sub('t0', "base_#{region.downcase}")
+    sub_rec[:file] = file_base + 'substation_power'
+    interval = sub_rec[:interval]
+    limit = sub_rec[:limit]
+
+    remove_classes_from_top_layer 'recorder', 'collector', 'multi_recorder', 'billdump'
+
+    xfmr_group_rec = GLMObject.new(self, {
+      class: 'group_recorder',
+      file: file_base + 'xfmr_kva.csv',
+      group: '"class=transformer"',
+      property: 'power_out_A.mag,power_out_B.mag,power_out_C.mag',
+      interval: interval,
+      limit: limit
+    })
+
+    climate_rec = GLMObject.new(self, {
+      class: 'recorder',
+      file: file_base + 'climate.csv',
+      parent: find_by_class('climate').first[:name],
+      property: 'solar_global,solar_dir,solar_diff,temperature,humidity',
+      interval: interval,
+      limit: limit
+    })
+
+    @lines.insert rec_i, '', sub_rec, '', xfmr_group_rec, '', climate_rec
+  end
+
+  def setup_baseline(region)
+    full_year_clock
+    use_custom_weather region
+    baseline_recorders region
+    remove_service_status_players
+    remove_extra_blanks_from_top_layer
   end
 
   def derate_residential_xfmrs(factor)
