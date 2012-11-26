@@ -263,7 +263,7 @@ class GLMWrangler
       class: 'recorder',
       file: file_base + 'climate.csv',
       parent: find_by_class('climate').first[:name],
-      property: 'solar_global,solar_dir,solar_diff,temperature,humidity',
+      property: 'solar_flux,temperature,humidity,wind_speed',
       interval: interval,
       limit: limit
     })
