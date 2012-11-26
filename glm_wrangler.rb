@@ -178,19 +178,19 @@ class GLMWrangler
   end
 
   def full_year_clock
-    # Unfortunately clock is not an object in GridLAB-D so we can't do this the easy way,
-    # but it's not too bad with @lines
+    # Unfortunately clock is not an object in GridLAB-D so we can't do this the easy way
+    # (that is, by setting a GLMObject's properties) but it's not too bad with @lines
     found_tz = found_start = found_stop = success = false
     @lines.each_with_index do |l, i|
       case l
-      when /^\s*timezone PST\+8PDT;/
-        # we're not changing the timezone here, just checking that it's what we expect
+      when /^(\s*timezone )/
+        @lines[i] = $1 + "PST+8PDT;"
         found_tz = true
       when /^(\s*starttime )/
-        @lines[i] = $1 + "'2011-09-25 00:00:00'"
+        @lines[i] = $1 + "'2011-09-25 00:00:00';"
         found_start = true
       when /^(\s*stoptime )/
-        @lines[i] = $1 + "'2012-09-24 23:59:59'"
+        @lines[i] = $1 + "'2012-09-24 23:59:59';"
         found_stop = true
       end
       success = found_tz && found_start && found_stop
