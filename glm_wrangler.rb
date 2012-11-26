@@ -259,7 +259,7 @@ class GLMWrangler
 
     # base any recorders we add off of the substation recorder
     file_base = sub_rec[:file][0, 13].sub('t0', "base_#{region.downcase}")
-    file_base = "#{file_base}/#{file_base}" # Putting all recordings in a subdir named after the model
+    file_base = "#{file_base[0..-2]}/#{file_base}" # Putting all recordings in a subdir named after the model
     sub_rec[:file] = file_base + 'substation_power.csv'
     interval = sub_rec[:interval]
     limit = sub_rec[:limit]
