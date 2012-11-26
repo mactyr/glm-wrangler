@@ -64,6 +64,7 @@ class GLMWrangler
   INDEX_PROPS = [:name, :class, :parent, :from, :to]
   PHASES = %w[A B C]
   DATA_DIR = 'data/'
+  SHARED_PATH = '../shared/'
   
   def initialize(infilename, outfilename, commands = nil)
     @infilename = infilename
@@ -199,6 +200,20 @@ class GLMWrangler
     raise "Failed to verify/update all clock settings" unless success
   end
 
+  # Update the #includes and voltage players to find their schedules in the shared directory,
+  # not the .glm's home directory
+  def use_shared_path
+    @lines.each_with_index do |l, i|
+      if l =~ /^#include "/
+        @lines[i] = l.sub '#include "', '#include "' + SHARED_PATH
+      end
+    end
+
+    find_by_name('network_node').first.nested.each do |obj|
+      obj[:file] = SHARED_PATH + obj[:file] if obj[:file]
+    end
+  end
+
   def use_custom_weather(region)
     region.downcase!
     loc = nil
@@ -220,7 +235,7 @@ class GLMWrangler
 
     # Update the climate object
     climate[:name] = "\"CA-#{region.capitalize}\""
-    climate[:tmyfile] = "#{region}_weather_full_year.csv"
+    climate[:tmyfile] = "#{SHARED_PATH}#{region}_weather_full_year.csv"
     climate[:reader] = "#{region}_csv_reader"
     climate.delete :interpolate
 
@@ -244,7 +259,8 @@ class GLMWrangler
 
     # base any recorders we add off of the substation recorder
     file_base = sub_rec[:file][0, 13].sub('t0', "base_#{region.downcase}")
-    sub_rec[:file] = file_base + 'substation_power'
+    file_base = "#{file_base}/#{file_base}" # Putting all recordings in a subdir named after the model
+    sub_rec[:file] = file_base + 'substation_power.csv'
     interval = sub_rec[:interval]
     limit = sub_rec[:limit]
 
@@ -281,6 +297,7 @@ class GLMWrangler
     use_custom_weather region
     baseline_recorders region
     remove_service_status_players
+    use_shared_path
     remove_extra_blanks_from_top_layer
   end
 
