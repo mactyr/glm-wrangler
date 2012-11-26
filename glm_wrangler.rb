@@ -248,13 +248,18 @@ class GLMWrangler
     interval = sub_rec[:interval]
     limit = sub_rec[:limit]
 
+    # we don't care about the phase balance of power flow, so let's cut down on data storage
+    # by just capturing the total power_in to the substation
+    sub_rec[:property] = 'power_in.real,power_in.imag'
+
     remove_classes_from_top_layer 'recorder', 'collector', 'multi_recorder', 'billdump'
 
     xfmr_group_rec = GLMObject.new(self, {
       class: 'group_recorder',
       file: file_base + 'xfmr_kva.csv',
       group: '"class=transformer"',
-      property: 'power_out_A.mag,power_out_B.mag,power_out_C.mag',
+      property: 'power_in',
+      complex_part: 'MAG',
       interval: interval,
       limit: limit
     })
