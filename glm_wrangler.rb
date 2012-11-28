@@ -268,7 +268,7 @@ class GLMWrangler
     # by just capturing the total power_in to the substation
     sub_rec[:property] = 'power_in.real,power_in.imag'
 
-    remove_classes_from_top_layer 'recorder', 'collector', 'multi_recorder', 'billdump'
+    remove_classes_from_top_layer 'recorder', 'collector', 'billdump'
 
     xfmr_group_rec = GLMObject.new(self, {
       class: 'group_recorder',
@@ -290,6 +290,13 @@ class GLMWrangler
     })
 
     @lines.insert rec_i, '', sub_rec, '', xfmr_group_rec, '', climate_rec
+
+    # adjust EOLVolt multi-recorder file destinations
+    find_by_class('multi_recorder').each do |obj|
+      volt_match = /EOLVolt[1-9]\.csv/.match(obj[:file])
+      raise "I found a multi-recorder that doesn't appear to be an EOLVolt recorder" if volt_match.nil?
+      obj[:file] = file_base + volt_match[0]
+    end
   end
 
   def setup_baseline(region)
