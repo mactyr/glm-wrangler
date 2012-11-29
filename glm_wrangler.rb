@@ -61,7 +61,6 @@ end
 class GLMWrangler
   VERSION = '0.1'.freeze
   OBJ_REGEX = /(^|\s+)object\s+/
-  INDEX_PROPS = [:name, :class, :parent, :from, :to]
   PHASES = %w[A B C]
   DATA_DIR = 'data/'
   SHARED_PATH = '../shared/'
@@ -71,10 +70,6 @@ class GLMWrangler
     @outfilename = outfilename
     @commands = commands
     @lines = []
-    @indexes = {}
-    INDEX_PROPS.each do |prop|
-      @indexes[prop] = Hash.new{|h,k| h[k] = []}
-    end
   end
   
   # Parse the .glm input file into ruby objects
@@ -85,7 +80,6 @@ class GLMWrangler
       if l =~ OBJ_REGEX   
         obj = GLMObject.from_file l, infile, self
         @lines << obj
-        index_obj obj
       else
         # For now anything that isn't inside an object declaration just gets
         # saved as a literal string.  We could get fancy and create classes for
@@ -96,14 +90,6 @@ class GLMWrangler
     end
     
     infile.close
-  end
-  
-  # recursively add a GLMObject to all the indexes we're creating
-  def index_obj(obj)
-    INDEX_PROPS.each do |prop|
-      @indexes[prop][obj[prop]] << obj if obj[prop]
-    end
-    obj.nested.each {|n_obj| index_obj n_obj}
   end
   
   def run
@@ -135,15 +121,11 @@ class GLMWrangler
     @lines.each {|l| outfile.puts l }
     outfile.close
   end
-  
+
   def method_missing(meth, *args, &block)
     if meth.to_s =~ /^find_by_(.+)$/
       prop = $1.to_sym
-      if @indexes[prop]
-        @indexes[prop][args[0]]
-      else
-        raise NoMethodError, "I don't know how to find by property #{$1}"
-      end
+      @lines.select {|l| l.is_a?(GLMObject) && l[prop] == args.first}
     else
       super # You *must* call super if you don't handle the
             # method, otherwise you'll mess up Ruby's method
