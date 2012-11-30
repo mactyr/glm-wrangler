@@ -499,9 +499,10 @@ class GLMObject < Hash
     comment_count = blank_count = 0
     done = false
     
-    if /^\s*(\w+\s+)?object\s+(\w+)\s+{/.match(dec_line) && !$2.nil?
+    if /^\s*(\w+\s+)?object\s+(\w+)(:\d*)?\s+{/.match(dec_line) && !$2.nil?
       self[:class] = $2
       self[:id] = $1.strip unless $1.nil? # this will usually be nil, but some objects are named
+      self[:num] = $3 unless $3.nil? # note that self[:num] will include the colon before the actual number
     else
       raise "Can't find class of object from '#{dec_line}'" if self[:class].nil?
     end
@@ -549,7 +550,7 @@ class GLMObject < Hash
   def to_s(indent = 0)
     raise "Can't convert a GLMObject with no :class to a string" if self[:class].nil?
     id_s = self[:id] ? self[:id] + ' ' : ''
-    out = tab(indent) + id_s + 'object ' + self[:class] + " {\n"
+    out = tab(indent) + id_s + 'object ' + self[:class] + (self[:num] || '') + " {\n"
     each do |key, val|
       prop_s = key.to_s
       out += case prop_s
@@ -557,7 +558,7 @@ class GLMObject < Hash
         tab(indent + 1) + val + "\n"
       when /^object/
         val.to_s(indent + 1)
-      when 'class', 'id'
+      when 'class', 'id', 'num'
         '' # these are used only in the object declaration line
       else
         tab(indent + 1) + prop_s + ' ' + val + ";#{@trailing_junk[key]} \n"
