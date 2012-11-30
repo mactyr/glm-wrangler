@@ -376,13 +376,21 @@ class GLMWrangler
   # Add Solar City generation profiles to the desired load_type until the
   # specified penetration fraction is reached.  peak_load is expected in kW.
   # Also add the players necessary to support each profile that's used.
-  def add_sc_solar(peak_load, penetration)
+  def add_sc_solar(peak_load, penetration, region)
 
     # load installation capacity values from a .csv
     # in the hash, the key is the InverterID and the value is the rated capacity in kW
     capacities = {}
     CSV.foreach(DATA_DIR + 'inverter_capacities.csv', :headers => true) do |row|
       capacities[row['SGInverter'].to_i] = row['InvCapEst'].to_f
+    end
+
+    # Load the geographic meter/profile matches for this feeder and region
+    # In the hash, the key is the meter node's name and the value is the
+    # profile (that is, inverter) ID
+    profiles = {}
+    CSV.foreach(DATA_DIR + "sc_match/#{File.basename(@infilename)[0,10]}#{region}.txt", headers: true) do |r|
+      profiles[r['node']] = r['SGInverter'].to_i
     end
 
     # Grab all possible target objects and shuffle them
@@ -402,8 +410,14 @@ class GLMWrangler
     until placed[:res] + placed[:comm] >= peak_load * penetration do
       target = targets.shift
       raise "Ran out of targets to add solar to" if target.nil?
-      # TODO: the profile chosen needs to be geographically determined, not randomized
-      profile = capacities.keys[rng.rand(capacities.size)]
+
+      # Find the Solar City profile corresponding to this target's meter
+      meter = target.first_upstream 'meter'
+      # Sometimes we have to step up through the meter hierarchy to get past the "fake"
+      # commercial sub-meters that Feeder_Generator adds
+      while meter[:name] =~ /load/ do meter = meter.first_upstream 'meter' end
+      profile = profiles[meter[:name]]
+      raise "Couldn't find a profile for #{target[:name]} under #{meter[:name]}" if profile.nil?
       profile_cap = capacities[profile]
 
       comment = "// Solar City PV generation rated at "
