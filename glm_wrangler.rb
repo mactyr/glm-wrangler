@@ -349,7 +349,6 @@ class GLMWrangler
       choices = configs.select do |candidate|
         similar_configs(candidate, old_config)
       end
-      puts choices.map {|c| config_phases(c)}.join(', ') if choices.any? {|c| config_phases(c) != config_phases(choices.first)}
       # It may be that none are big enough, in which case we just choose the last candidate
       # (which because of the sorting will be the candidate with the largest rating)
       # If there were no choices (that is, no similar configs) new_config will wind up being nil
