@@ -64,7 +64,35 @@ class GLMWrangler
   PHASES = %w[A B C]
   DATA_DIR = 'data/'
   SHARED_PATH = '../shared/'
+  EXT = '.glm'
   
+  # Do "the works" (parse, edit according to the given commands, sign and output)
+  # on a single .glm file
+  def self.process(infilename, outfilename, commands = nil)
+    puts "Processing #{File.basename(infilename)}"
+    wrangler = GLMWrangler.new infilename, outfilename, commands
+    wrangler.parse
+    wrangler.run
+    wrangler.sign
+    puts "Writing #{File.basename(outfilename)}"
+    wrangler.write
+    puts
+  end
+
+  # Batch process all the .glm files in a given directory according to the given
+  # commands.  Output files go to the specified output path, with the optional
+  # suffix inserted into the file name.
+  def self.batch(inpath, outpath, suffix = '', commands = nil)
+    [inpath, outpath].each {|path| path += '/' unless path[-1] == '/'}
+    puts(inpath + '*' + EXT)
+    infiles = Dir.glob(inpath + '*' + EXT)
+    puts "Batch processing #{infiles.length} files"
+    infiles.each do |infile|
+      outfile = outpath + File.basename(infile, EXT) + suffix + EXT
+      process infile, outfile, commands
+    end
+  end
+
   def initialize(infilename, outfilename, commands = nil)
     @infilename = infilename
     @outfilename = outfilename
@@ -98,7 +126,7 @@ class GLMWrangler
       interactive
     else
       @commands.each do |cmd|
-        puts "Executing command: #{cmd}"
+        puts "- Executing command: #{cmd}"
         instance_eval cmd
       end
     end
@@ -389,7 +417,7 @@ class GLMWrangler
     # In the hash, the key is the meter node's name and the value is the
     # profile (that is, inverter) ID
     profiles = {}
-    CSV.foreach(DATA_DIR + "sc_match/#{File.basename(@infilename)[0,10]}#{region}.txt", headers: true) do |r|
+    CSV.foreach(DATA_DIR + "sc_match/#{File.basename(@infilename)[0,10]}#{region}.csv", headers: true) do |r|
       profiles[r['node']] = r['SGInverter'].to_i
     end
 
@@ -412,6 +440,7 @@ class GLMWrangler
       raise "Ran out of targets to add solar to" if target.nil?
 
       # Find the Solar City profile corresponding to this target's meter
+      # FIXME: We should be looking for meters OR triplex_meters
       meter = target.first_upstream 'meter'
       # Sometimes we have to step up through the meter hierarchy to get past the "fake"
       # commercial sub-meters that Feeder_Generator adds
@@ -645,11 +674,17 @@ end
 
 # Main execution of the script.  Just grabs the parameters and tells
 # GLMWrangler to do its thing
-infilename = ARGV.shift
-outfilename = ARGV.shift
-
-wrangler = GLMWrangler.new infilename, outfilename, ARGV
-wrangler.parse
-wrangler.run
-wrangler.sign
-wrangler.write
+case ARGV.first
+when nil
+  puts "Single instance usage: ruby glm_wrangler.rb <input file> <output file> [command]..."
+  puts "          Batch usage: ruby glm_wrangler.rb -b[file suffix]  <input dir> <output dir> [command]..."
+when /^-b/
+  suffix = ARGV.shift[2..-1]
+  inpath = ARGV.shift
+  outpath = ARGV.shift
+  GLMWrangler.batch inpath, outpath, suffix, ARGV
+else
+  infilename = ARGV.shift
+  outfilename = ARGV.shift
+  GLMWrangler.process infilename, outfilename, ARGV
+end
