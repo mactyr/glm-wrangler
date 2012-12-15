@@ -114,7 +114,7 @@ class GLMWrangler
     
     while l = infile.gets do    
       if l =~ OBJ_REGEX   
-        obj = GLMObject.from_file l, infile, self
+        obj = GLMObject.new self, dec_line: l, infile: infile
         @lines << obj
       else
         # For now anything that isn't inside an object declaration just gets
@@ -566,11 +566,6 @@ class GLMObject < Hash
   
   attr_reader :nested
   
-  def self.from_file(dec_line, infile, wrangler, nesting_parent = nil)
-    obj = new wrangler, {}, nesting_parent
-    obj.populate_from_file dec_line, infile
-  end
-  
   def initialize(wrangler, props = {}, nesting_parent = nil)
     # Is there a semicolon after the closing '}' for this object?
     # Defaults to true because having a semicolon is always safe
@@ -584,6 +579,9 @@ class GLMObject < Hash
     @wrangler = wrangler
     @nesting_parent = nesting_parent
     @trailing_junk = {}
+    if (dec_line = props.delete(:dec_line)) && (infile = props.delete(:infile))
+      populate_from_file dec_line, infile
+    end
     props.each {|key, val| self[key] = val}
   end
   
@@ -616,7 +614,7 @@ class GLMObject < Hash
         self[('comment' + comment_count.to_s).to_sym] = l
         comment_count += 1
       when GLMWrangler::OBJ_REGEX
-        push_nested self.class.from_file(l, infile, @wrangler, self)
+        push_nested self.class.new(@wrangler, {dec_line: l, infile: infile}, self)
       when /^([\w.]+)\s+([^;]+);(.*)$/
         # note: there will be trouble here if a property is set to a quoted
         # string that contains a ';'
