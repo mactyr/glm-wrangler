@@ -318,7 +318,7 @@ class GLMWrangler
     remove_extra_blanks_from_top_layer
   end
 
-  def rerate_dist_xfmrs(region)
+  def rerate_dist_xfmrs(region, log_file = nil)
     # Get the overall rating for a configuration
     def config_rating(xfmr_config)
       rating = 0
@@ -366,6 +366,14 @@ class GLMWrangler
     configs.sort! {|a, b| config_rating(a) <=> config_rating(b)}
     # puts "Found #{configs.length} viable xfmr configurations"
 
+    # Keep track of some things for logging purposes
+    counts = Hash.new 0
+    counts[:total] = xfmrs.length
+    [:changed, :unchanged, :failed].each do |k|
+      counts[k] = 0
+    end
+    undersized = Hash.new 0
+
     xfmrs.each do |xfmr|
       # Mark that these are the transformers where we will track aging
       xfmr[:groupid] = 'Aging_Trans'
@@ -388,17 +396,45 @@ class GLMWrangler
       if new_config
         if new_config == old_config
           xfmr[:comment0] = "// Transformer configuration unchanged; rated #{old_rating}kVA given a max load of #{max_load}kVA"
+          counts[:unchanged] += 1
         else
           xfmr[:configuration] = new_config[:name]
           xfmr[:comment0] = "// Transformer configuration changed from t_c_#{old_config[:name] =~ /\d+$/} (#{old_rating}kVA) to #{config_rating(new_config)}kVA given a max load of #{max_load}kVA"
+          counts[:changed] += 1
         end
       else
         xfmr[:comment0] = "// Could not find any appropriate configuration; leaving original with a rating of #{old_rating}kVA given a max load of #{max_load}kVA"
+        counts[:failed] += 1
       end
-      undersized = max_load - config_rating(new_config || old_config)
-      xfmr[:comment0] += " (Undersized by #{'%.1f' % undersized}kVA!)" if undersized > 0
+      undersized_by = max_load - config_rating(new_config || old_config)
+      if undersized_by > 0
+        xfmr[:comment0] += " (Undersized by #{'%.1f' % undersized_by}kVA!)"
+        undersized[xfmr[:name]] = undersized_by
+      end
     end
 
+    if log_file
+      out = Hash.new 'N/A'
+      out[:time] = Time.now
+      out[:infile] = File.basename(@infilename)
+      out[:region] = region
+      out.merge! counts
+      if undersized.empty?
+        [:undersized, :most_undersized_id, :most_undersized_by, :avg_undersized_by].each do |k|
+          out[k] = 'N/A'
+        end
+      else
+        out[:undersized] = undersized.length
+        most_undersized = undersized.max_by {|k, v| v}
+        out[:most_undersized_id] = most_undersized.first
+        out[:most_undersized_by] = '%.1f' % most_undersized.last
+        out[:avg_undersized_by] = '%.1f' % (undersized.values.inject(:+).to_f / undersized.length)
+      end
+      write_headers = !File.exist?(log_file)
+      CSV.open(log_file, 'a+', headers: out.keys, write_headers: write_headers) do |log_f|
+        log_f << out.values
+      end
+    end
   end
   
   # Add Solar City generation profiles to the desired load_type until the
