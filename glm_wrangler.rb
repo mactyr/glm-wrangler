@@ -579,6 +579,7 @@ class GLMObject < Hash
     @wrangler = wrangler
     @nesting_parent = nesting_parent
     @trailing_junk = {}
+    @class = props.delete(:class)
 
     # If we find the special 'properties' :dec_line and :infile, use them to
     # populate this GLMObject's properties from the file
@@ -587,7 +588,16 @@ class GLMObject < Hash
     end
 
     props.each {|key, val| self[key] = val}
-    raise "GLMObject created without a :class property. Props: #{props}" if self[:class].nil?
+    raise "GLMObject created without a class. Props: #{props}" if @class.nil?
+  end
+
+  def [](k)
+    k == :class ? @class : super
+  end
+
+  def []=(k, v)
+    raise "Can't change a GLMObject's GLM class once it's created." if k == :class
+    super
   end
   
   # populates this object, declared by dec_line (which is assumed to have just
@@ -599,7 +609,7 @@ class GLMObject < Hash
     done = false
     
     if /^\s*(\w+\s+)?object\s+(\w+)(:\d*)?\s+{/.match(dec_line) && !$2.nil?
-      self[:class] = $2
+      @class = $2
       self[:id] = $1.strip unless $1.nil? # this will usually be nil, but some objects are named
       self[:num] = $3 unless $3.nil? # note that self[:num] will include the colon before the actual number
     end
@@ -645,9 +655,8 @@ class GLMObject < Hash
   end
   
   def to_s(indent = 0)
-    raise "Can't convert a GLMObject with no :class to a string" if self[:class].nil?
     id_s = self[:id] ? self[:id] + ' ' : ''
-    out = tab(indent) + id_s + 'object ' + self[:class] + (self[:num] || '') + " {\n"
+    out = tab(indent) + id_s + 'object ' + @class + (self[:num] || '') + " {\n"
     each do |key, val|
       prop_s = key.to_s
       out += case prop_s
@@ -655,7 +664,7 @@ class GLMObject < Hash
         tab(indent + 1) + val + "\n"
       when /^object/
         val.to_s(indent + 1)
-      when 'class', 'id', 'num'
+      when 'id', 'num'
         '' # these are used only in the object declaration line
       else
         tab(indent + 1) + prop_s + ' ' + val + ";#{@trailing_junk[key]} \n"
