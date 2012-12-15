@@ -61,7 +61,6 @@ end
 class GLMWrangler
   VERSION = '0.1'.freeze
   OBJ_REGEX = /(^|\s+)object\s+/
-  PHASES = %w[A B C]
   DATA_DIR = 'data/'
   SHARED_PATH = '../shared/'
   EXT = '.glm'
@@ -327,39 +326,6 @@ class GLMWrangler
   end
 
   def rerate_dist_xfmrs(region, log_file = nil)
-    # Get the overall rating for a configuration
-    def config_rating(xfmr_config)
-      rating = 0
-      if xfmr_config[:power_rating]
-        rating = xfmr_config[:power_rating].to_f
-      else
-        rating = PHASES.inject(0) {|sum, ph| sum += (xfmr_config["power#{ph}_rating".to_sym] || 0).to_f}
-      end
-      raise "Can't find a rating for #{xfmr_config[:name]}" if rating == 0
-      rating
-    end
-
-    # Collect the phases that the xfmr is rated on into a string
-    def config_phases(xfmr_config)
-      phs = ''
-      PHASES.each do |ph|
-        rating = xfmr_config["power#{ph}_rating".to_sym]
-        phs += ph unless rating.nil? || rating.to_f == 0
-      end
-      phs
-    end
-
-    # Determine if two configs are similar in all important ways except rating
-    # That is, they must have the same type, voltage, and rated phases
-    # (though not necessarily the exact same rating, of course)
-    def similar_configs(config_a, config_b)
-      return false if [:connect_type, :install_type, :primary_voltage, :secondary_voltage].any? do |prop|
-        config_a[prop] != config_b[prop]
-      end
-
-      config_phases(config_a) == config_phases(config_b)
-    end
-
     # Get the max loading for each xfmr
     max_loads = {}
     CSV.foreach(DATA_DIR + "xfmr_kva/#{File.basename(@infilename)[0,10]}#{region}_xfmr_kva.csv", headers: true) do |r|
@@ -370,8 +336,7 @@ class GLMWrangler
     # and sort them by rating.  Ignore the "load"/"CTTF" transformers added by Feeder_Generator
     # for commercial loads, since they are set up in a load-specific way
     xfmrs = find_by_groupid('Distribution_Trans').select {|xfmr| xfmr[:name] !~ /load/}
-    configs = xfmrs.map {|xfmr| find_by_name(xfmr[:configuration]).first}.uniq
-    configs.sort! {|a, b| config_rating(a) <=> config_rating(b)}
+    configs = xfmrs.map {|xfmr| find_by_name(xfmr[:configuration]).first}.uniq.sort_by {|c| c.rating}
     # puts "Found #{configs.length} viable xfmr configurations"
 
     # Keep track of some things for logging purposes
@@ -390,31 +355,29 @@ class GLMWrangler
       # from the baseline run.  The new config may be the same as the old, of course.
       max_load = max_loads[xfmr[:name]].to_f
       old_config = find_by_name(xfmr[:configuration]).first
-      choices = configs.select do |candidate|
-        similar_configs(candidate, old_config)
-      end
+      choices = configs.select {|candidate| candidate.similar_to? old_config}
       # It may be that none are big enough, in which case we just choose the last candidate
       # (which because of the sorting will be the candidate with the largest rating)
       # If there were no choices (that is, no similar configs) new_config will wind up being nil
-      new_config = choices.find {|candidate| config_rating(candidate) >= max_load} || choices.last
+      new_config = choices.find {|candidate| candidate.rating >= max_load} || choices.last
 
       # Change the xfmr's config if we've found a better one,
       # and leave a note about what we've done in any case.
-      old_rating = config_rating old_config
+      old_rating = old_config.rating
       if new_config
         if new_config == old_config
           xfmr[:comment0] = "// Transformer configuration unchanged; rated #{old_rating}kVA given a max load of #{max_load}kVA"
           counts[:unchanged] += 1
         else
           xfmr[:configuration] = new_config[:name]
-          xfmr[:comment0] = "// Transformer configuration changed from t_c_#{old_config[:name] =~ /\d+$/} (#{old_rating}kVA) to #{config_rating(new_config)}kVA given a max load of #{max_load}kVA"
+          xfmr[:comment0] = "// Transformer configuration changed from t_c_#{old_config[:name] =~ /\d+$/} (#{old_rating}kVA) to #{new_config.rating}kVA given a max load of #{max_load}kVA"
           counts[:changed] += 1
         end
       else
         xfmr[:comment0] = "// Could not find any appropriate configuration; leaving original with a rating of #{old_rating}kVA given a max load of #{max_load}kVA"
         counts[:failed] += 1
       end
-      undersized_by = max_load - config_rating(new_config || old_config)
+      undersized_by = max_load - (new_config.rating || old_config.rating)
       if undersized_by > 0
         xfmr[:comment0] += " (Undersized by #{'%.1f' % undersized_by}kVA!)"
         undersized[xfmr[:name]] = undersized_by
@@ -589,6 +552,11 @@ class GLMObject < Hash
 
     props.each {|key, val| self[key] = val}
     raise "GLMObject created without a class. Props: #{props}" if @class.nil?
+
+    # If there's a module named after this object's GLM class,
+    # extend the object with the module
+    mod = get_module(@class.split('_').map {|s| s.capitalize}.join(''))
+    extend(mod) if mod
   end
 
   def [](k)
@@ -732,7 +700,48 @@ class GLMObject < Hash
     @nested << obj
     obj
   end
+
+  def get_module(name)
+    mod = self.class.const_defined?(name) && self.class.const_get(name)
+    mod.instance_of?(::Module) ? mod : nil
+  end
   
+end
+
+module GLMObject::TransformerConfiguration
+  PHASES = %w[A B C]
+
+  # Get the overall 3ph rating for the configuration
+  def rating
+    r = 0
+    if self[:power_rating]
+      r = self[:power_rating].to_f
+    else
+      r = PHASES.inject(0) {|sum, ph| sum += (self["power#{ph}_rating".to_sym] || 0).to_f}
+    end
+    raise "Can't find a rating for #{self[:name]}" if r == 0
+    r
+  end
+
+  # Collect the phases that the xfmr is rated on into a string
+  def phases
+    phs = ''
+    PHASES.each do |ph|
+      rating = self["power#{ph}_rating".to_sym]
+      phs += ph unless rating.nil? || rating.to_f == 0
+    end
+    phs
+  end
+
+  # Determine if another config is similar in all important ways except rating
+  # That is, they must have the same type, voltage, and rated phases
+  def similar_to?(other)
+    return false if [:connect_type, :install_type, :primary_voltage, :secondary_voltage].any? do |prop|
+      self[prop] != other[prop]
+    end
+
+    self.phases == other.phases
+  end
 end
 
 # Main execution of the script.  Just grabs the parameters and tells
