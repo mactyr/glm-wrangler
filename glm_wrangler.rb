@@ -579,10 +579,15 @@ class GLMObject < Hash
     @wrangler = wrangler
     @nesting_parent = nesting_parent
     @trailing_junk = {}
+
+    # If we find the special 'properties' :dec_line and :infile, use them to
+    # populate this GLMObject's properties from the file
     if (dec_line = props.delete(:dec_line)) && (infile = props.delete(:infile))
       populate_from_file dec_line, infile
     end
+
     props.each {|key, val| self[key] = val}
+    raise "GLMObject created without a :class property. Props: #{props}" if self[:class].nil?
   end
   
   # populates this object, declared by dec_line (which is assumed to have just
@@ -597,8 +602,6 @@ class GLMObject < Hash
       self[:class] = $2
       self[:id] = $1.strip unless $1.nil? # this will usually be nil, but some objects are named
       self[:num] = $3 unless $3.nil? # note that self[:num] will include the colon before the actual number
-    else
-      raise "Can't find class of object from '#{dec_line}'" if self[:class].nil?
     end
     
     until done do
