@@ -362,8 +362,8 @@ class GLMWrangler
     # and sort them by rating.  Ignore the "load"/"CTTF" transformers added by Feeder_Generator
     # for commercial loads, since they are set up in a load-specific way
     xfmrs = find_by_groupid('Distribution_Trans').select {|xfmr| xfmr[:name] !~ /load/}
-    configs = xfmrs.map {|xfmr| find_by_name(xfmr[:configuration]).first}
-    configs.uniq!.sort! {|a, b| config_rating(a) <=> config_rating(b)}
+    configs = xfmrs.map {|xfmr| find_by_name(xfmr[:configuration]).first}.uniq
+    configs.sort! {|a, b| config_rating(a) <=> config_rating(b)}
     # puts "Found #{configs.length} viable xfmr configurations"
 
     xfmrs.each do |xfmr|
