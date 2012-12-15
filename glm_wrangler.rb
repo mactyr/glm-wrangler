@@ -81,7 +81,8 @@ class GLMWrangler
 
   # Batch process all the .glm files in a given directory according to the given
   # commands.  Output files go to the specified output path, with the optional
-  # suffix inserted into the file name.
+  # file_sub inserted into the file name (if it doesn't contain a '/')
+  # or treated as a regex replacement (if it does contain a '/')
   def self.batch(inpath, outpath, file_sub = '', commands = nil)
     infiles = Dir.glob(File.join(inpath, '*' + EXT))
     puts "Batch processing #{infiles.length} files"
