@@ -82,13 +82,20 @@ class GLMWrangler
   # Batch process all the .glm files in a given directory according to the given
   # commands.  Output files go to the specified output path, with the optional
   # suffix inserted into the file name.
-  def self.batch(inpath, outpath, suffix = '', commands = nil)
-    [inpath, outpath].each {|path| path += '/' unless path[-1] == '/'}
-    puts(inpath + '*' + EXT)
-    infiles = Dir.glob(inpath + '*' + EXT)
+  def self.batch(inpath, outpath, file_sub = '', commands = nil)
+    infiles = Dir.glob(File.join(inpath, '*' + EXT))
     puts "Batch processing #{infiles.length} files"
+    file_sub = file_sub.split('/')
     infiles.each do |infile|
-      outfile = outpath + File.basename(infile, EXT) + suffix + EXT
+      outbasename = case file_sub.length
+      when 1
+        File.basename(infile, EXT) + file_sub.first + EXT
+      when 2
+        File.basename(infile).sub(Regexp.new(file_sub.first), file_sub.last)
+      else
+        File.basename(infile)
+      end
+      outfile = File.join(outpath, outbasename)
       process infile, outfile, commands
     end
   end
@@ -722,7 +729,14 @@ end
 case ARGV.first
 when nil
   puts "Single instance usage: ruby glm_wrangler.rb <input file> <output file> [command]..."
-  puts "          Batch usage: ruby glm_wrangler.rb -b[file suffix]  <input dir> <output dir> [command]..."
+  puts "          Batch usage: ruby glm_wrangler.rb -b[file renaming]  <input dir> <output dir> [command]..."
+  puts
+  puts 'If no [file renaming] is specified in batch mode, the output file names will be'
+  puts 'exactly the same as the input file names.'
+  puts 'If [file renaming] is specified but does not contain a "/", it will be treated as a suffix'
+  puts 'and inserted just before the extension in all output file names'
+  puts 'If [file renaming] contains a "/", a regex replacement will be done to replace whatever comes'
+  puts 'before the "/" with whatever comes after it'
 when /^-b/
   suffix = ARGV.shift[2..-1]
   inpath = ARGV.shift
