@@ -404,7 +404,16 @@ class GLMWrangler
   # Add Solar City generation profiles to the desired load_type until the
   # specified penetration fraction is reached.  peak_load is expected in kW.
   # Also add the players necessary to support each profile that's used.
-  def add_sc_solar(peak_load, penetration, region)
+  def add_sc_solar(penetration, region)
+    base_feeder_name = File.basename(@infilename)[0, 9]
+    region.downcase!
+
+    # find the peak load of this feeder, to gauge penetration against
+    peak_load = nil
+    CSV.foreach(DATA_DIR + 'baseline_peak_loads.csv', :headers => true) do |row|
+      peak_load = row['max_load_kw'].to_i if row['name'] == "#{base_feeder_name}_base_#{region}"
+    end
+    raise "Couldn't find peak load for #{base_feeder_name} in #{region}" if peak_load.nil?
 
     # load installation capacity values from a .csv
     # in the hash, the key is the InverterID and the value is the rated capacity in kW
@@ -417,7 +426,7 @@ class GLMWrangler
     # In the hash, the key is the meter node's name and the value is the
     # profile (that is, inverter) ID
     profiles = {}
-    CSV.foreach(DATA_DIR + "sc_match/#{File.basename(@infilename)[0,10]}#{region}.csv", headers: true) do |r|
+    CSV.foreach(DATA_DIR + "sc_match/#{base_feeder_name}_#{region}.csv", headers: true) do |r|
       profiles[r['node']] = r['SGInverter'].to_i
     end
 
