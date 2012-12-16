@@ -69,13 +69,17 @@ class GLMWrangler
   DATA_DIR = 'data/'
   SHARED_PATH = '../shared/'
   EXT = '.glm'
-  
+
+  def self.glms_in_path(path)
+    Dir.glob(File.join(path, '*' + EXT))
+  end
+  private_class_method :glms_in_path
+
   # Do "the works" (parse, edit according to the given commands, sign and output)
   # on a single .glm file
   def self.process(infilename, outfilename = nil, *commands)
     puts "Processing file: #{File.basename(infilename)}"
-    wrangler = GLMWrangler.new infilename, outfilename, commands
-    wrangler.parse
+    wrangler = new infilename: infilename, outfilename: outfilename, commands: commands
     wrangler.run
     wrangler.sign
     wrangler.write
@@ -87,7 +91,7 @@ class GLMWrangler
   # file_sub inserted into the file name (if it doesn't contain a '/')
   # or treated as a regex replacement (if it does contain a '/')
   def self.batch(inpath, outpath, file_sub = '', *commands)
-    infiles = Dir.glob(File.join(inpath, '*' + EXT))
+    infiles = glms_in_path inpath
     puts "Batch processing #{infiles.length} files"
     file_sub = file_sub.split('/')
     infiles.each do |infile|
@@ -104,15 +108,46 @@ class GLMWrangler
     end
   end
 
-  def initialize(infilename, outfilename = nil, commands = nil)
-    @infilename = infilename
-    @outfilename = outfilename
-    @commands = commands
+  # generate a "menu" of unique transformer_configurations in standard sizes
+  # from a folder of .glm objects.
+  def self.xfmr_config_menu(inpath, outfilename)
+    infiles = glms_in_path inpath
+    puts "Generating transformer_configuration menu from #{infiles.length} files"
+    all_configs = []
+    infiles.each do |f|
+      in_wrangler = new infilename: f
+      all_configs += in_wrangler.find_by_class('transformer_configuration')
+    end
+
+    # Pare down the list of all configs found to just the "standard" ones we can use
+    all_configs.select! {|tc| tc.real? && tc.standard_size?}
+    # If we're scrounging original taxonomy feeders (as opposed to Feeder_Generator.m
+    # "loaded" feeders) then they'll have id numbers rather than names, which we'll
+    # need to fix.
+    all_configs.each do |tc|
+      if tc[:num]
+        tc[:name] = "#{tc[:class]}_#{tc[:num]}"
+        tc.delete :num
+      end
+    end
+
+    puts "Writing #{all_configs.length} configurations to #{outfilename}"
+    out_wrangler = new outfilename: outfilename, lines: all_configs
+    out_wrangler.sign "GLMWrangler::#{__method__}"
+    out_wrangler.write
+  end
+
+  def initialize(options)
+    @infilename = options[:infilename]
+    @outfilename = options[:outfilename]
+    @commands = options[:commands]
     @lines = []
+    parse! if @infilename
+    @lines += options[:lines] || []
   end
   
   # Parse the .glm input file into ruby objects
-  def parse
+  def parse!
     infile = File.open @infilename
     
     while l = infile.gets do    
@@ -145,13 +180,14 @@ class GLMWrangler
   
   # put a line after all other comments at the top of the .glm that notes
   # how the .glm was wrangled
-  def sign
+  def sign(commands = @commands)
+    commands.join(' ') if commands.respond_to? :join
     first_content_i = @lines.index {|l| !l.blank? && !l.comment?}
     raise "Couldn't find any non-blank, non-comment lines in the .glm" if first_content_i.nil?
     signature1 = "// Wrangled by GLMWrangler #{VERSION} from #{@infilename} to #{@outfilename}"
     signature2 = "// by #{ENV['USERNAME'] || ENV['USER']} at #{Time.now.getlocal}"
-    commands = '// Wrangler commands: ' + (@commands.blank? ? '[no commands - defaulted to interactive session]' : @commands.join(' '))
-    @lines.insert first_content_i, signature1, signature2, commands, ''
+    command_str = '// Wrangler commands: ' + (commands.blank? ? '[no commands - defaulted to interactive session]' : commands)
+    @lines.insert first_content_i, signature1, signature2, command_str, ''
   end
   
   # write out a DOT file based on the parsed objects
@@ -583,10 +619,10 @@ class GLMObject < Hash
     comment_count = blank_count = 0
     done = false
     
-    if /^\s*(\w+\s+)?object\s+(\w+)(:\d*)?\s+{/.match(dec_line) && !$2.nil?
+    if /^\s*(\w+\s+)?object\s+(\w+)(:(\d*))?\s+{/.match(dec_line) && !$2.nil?
       @class = $2
       self[:id] = $1.strip unless $1.nil? # this will usually be nil, but some objects are named
-      self[:num] = $3 unless $3.nil? # note that self[:num] will include the colon before the actual number
+      self[:num] = $4 unless $4.nil? # note that self[:num] will include the colon before the actual number
     end
     
     until done do
@@ -631,7 +667,7 @@ class GLMObject < Hash
   
   def to_s(indent = 0)
     id_s = self[:id] ? self[:id] + ' ' : ''
-    out = tab(indent) + id_s + 'object ' + @class + (self[:num] || '') + " {\n"
+    out = tab(indent) + id_s + 'object ' + @class + (self[:num] ? ":#{self[:num]}" : '') + " {\n"
     each do |key, val|
       prop_s = key.to_s
       out += case prop_s
@@ -717,6 +753,11 @@ end
 
 module GLMObject::TransformerConfiguration
   PHASES = %w[A B C]
+  # This is like the standard xfmr sizes from IEEE Std C57.12.20-2011 except that:
+  # We add 5, to accomodate 15kVA 3ph xfmrs and very small single-phase loads
+  # We substitute 175 for 167 and 337.5 for 333 since there are no 167 or 333kVA
+  # xfmrs in the GridLAB-D taxonomy feeders
+  STD_KVA_1PH = [5, 10, 15, 25, 37.5, 50, 75, 100, 175, 250, 337.5, 500]
 
   # Get the overall 3ph rating for the configuration
   def rating
@@ -730,7 +771,11 @@ module GLMObject::TransformerConfiguration
     r
   end
 
-  # Collect the phases that the xfmr is rated on into a string
+  def per_phase_rating
+    rating / phase_count
+  end
+
+  # Collect the phases that the transformer_config is rated on into a string
   def phases
     phs = ''
     PHASES.each do |ph|
@@ -738,6 +783,10 @@ module GLMObject::TransformerConfiguration
       phs += ph unless rating.nil? || rating.to_f == 0
     end
     phs
+  end
+
+  def phase_count
+    phases.length
   end
 
   # Determine if another config is similar in all important ways except rating
@@ -748,6 +797,18 @@ module GLMObject::TransformerConfiguration
     end
 
     self.phases == other.phases
+  end
+
+  # Is this NOT one of the "fake" transformer configs added by Feeder_Generator.m
+  # to serve sub-components of commercial loads?
+  def real?
+    self[:name] !~ /load/
+  end
+
+  def standard_size?
+    r = per_phase_rating
+    # Being loose with the matching here to account for any floating-point oddness
+    STD_KVA_1PH.find {|std| (std - r).abs <= 1}
   end
 end
 
