@@ -35,9 +35,12 @@
 #   in the .glm file, although it does indent sanely.  Thus, to compare to your
 #   original you should use 'diff -b' which ignores whitespace changes.
 
-require 'pry'
+begin
+  require 'pry'
+rescue LoadError
+  warn "Warning: pry gem not found; you can use glm_wrangler without pry, but will get an error if you try to use 'interactive' mode"
+end
 require 'csv'
-require 'debugger'
 
 version_pieces = RUBY_VERSION.split '.'
 unless version_pieces[0] == '1' && version_pieces[1] == '9'
