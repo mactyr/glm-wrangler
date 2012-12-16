@@ -3,6 +3,8 @@
 # This software is (c) 2012 Michael A. Cohen
 # It is released under the simplified BSD license, which can be found at:
 # http://www.opensource.org/licenses/BSD-2-Clause
+#
+# TODO: This is out of date
 # 
 # This script basically gives you an object representation of a .glm to work with.
 # It then outputs the object representation as a new .glm
@@ -67,13 +69,12 @@ class GLMWrangler
   
   # Do "the works" (parse, edit according to the given commands, sign and output)
   # on a single .glm file
-  def self.process(infilename, outfilename, commands = nil)
-    puts "Processing #{File.basename(infilename)}"
+  def self.process(infilename, outfilename = nil, *commands)
+    puts "Processing file: #{File.basename(infilename)}"
     wrangler = GLMWrangler.new infilename, outfilename, commands
     wrangler.parse
     wrangler.run
     wrangler.sign
-    puts "Writing #{File.basename(outfilename)}"
     wrangler.write
     puts
   end
@@ -82,7 +83,7 @@ class GLMWrangler
   # commands.  Output files go to the specified output path, with the optional
   # file_sub inserted into the file name (if it doesn't contain a '/')
   # or treated as a regex replacement (if it does contain a '/')
-  def self.batch(inpath, outpath, file_sub = '', commands = nil)
+  def self.batch(inpath, outpath, file_sub = '', *commands)
     infiles = Dir.glob(File.join(inpath, '*' + EXT))
     puts "Batch processing #{infiles.length} files"
     file_sub = file_sub.split('/')
@@ -96,11 +97,11 @@ class GLMWrangler
         File.basename(infile)
       end
       outfile = File.join(outpath, outbasename)
-      process infile, outfile, commands
+      process infile, outfile, *commands
     end
   end
 
-  def initialize(infilename, outfilename, commands = nil)
+  def initialize(infilename, outfilename = nil, commands = nil)
     @infilename = infilename
     @outfilename = outfilename
     @commands = commands
@@ -152,9 +153,12 @@ class GLMWrangler
   
   # write out a DOT file based on the parsed objects
   def write
-    outfile = File.open @outfilename, 'w'
-    @lines.each {|l| outfile.puts l }
-    outfile.close
+    if @outfilename
+      puts "Writing #{File.basename(@outfilename)}"
+      File.open(@outfilename, 'w') {|f| @lines.each {|l| f.puts l} }
+    else
+      puts "No destination file given, exiting without writing."
+    end
   end
 
   def method_missing(meth, *args, &block)
@@ -746,24 +750,9 @@ end
 
 # Main execution of the script.  Just grabs the parameters and tells
 # GLMWrangler to do its thing
-case ARGV.first
-when nil
-  puts "Single instance usage: ruby glm_wrangler.rb <input file> <output file> [command]..."
-  puts "          Batch usage: ruby glm_wrangler.rb -b[file renaming]  <input dir> <output dir> [command]..."
-  puts
-  puts 'If no [file renaming] is specified in batch mode, the output file names will be'
-  puts 'exactly the same as the input file names.'
-  puts 'If [file renaming] is specified but does not contain a "/", it will be treated as a suffix'
-  puts 'and inserted just before the extension in all output file names'
-  puts 'If [file renaming] contains a "/", a regex replacement will be done to replace whatever comes'
-  puts 'before the "/" with whatever comes after it'
-when /^-b/
-  suffix = ARGV.shift[2..-1]
-  inpath = ARGV.shift
-  outpath = ARGV.shift
-  GLMWrangler.batch inpath, outpath, suffix, ARGV
+method_sym = ARGV.first.to_sym
+if GLMWrangler.respond_to? method_sym
+  GLMWrangler.send method_sym, *ARGV[1..-1]
 else
-  infilename = ARGV.shift
-  outfilename = ARGV.shift
-  GLMWrangler.process infilename, outfilename, ARGV
+  GLMWrangler.process *ARGV
 end
