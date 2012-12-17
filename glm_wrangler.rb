@@ -63,6 +63,14 @@ class String
   end
 end
 
+class Array
+  # Returns the object in the middle of the array when sorted with &block
+  # If the array has an even number of elements, returns the first of the middle two
+  def mid_by(&block)
+    length <= 2 ? first : sort_by(&block)[length / 2]
+  end
+end
+
 class GLMWrangler
   VERSION = '0.1'.freeze
   OBJ_REGEX = /(^|\s+)object\s+/
@@ -131,7 +139,22 @@ class GLMWrangler
       end
     end
 
-    puts "Writing #{all_configs.length} configurations to #{outfilename}"
+    # Turns out that the taxonomy feeders reuse names between them, so we need to
+    # create out own set of unique id numbers for the menu.  We do this by prefixing
+    # each config's index in the array with the letter "i" for "import"
+    # We overwrite the old id number since it's not unique anyway
+    all_configs.each_with_index do |tc, i|
+      tc[:name].sub! /\d+$/, "i#{i+1}"
+    end
+
+    # This will output a .csv table listing all the configs on the menu; useful for debugging
+    # CSV.open('xfmr_table.csv', 'w') do |f|
+    #   all_configs.each do |tc|
+    #     f << [tc[:name], tc.rating, tc.per_phase_rating, tc[:primary_voltage], tc[:secondary_voltage], tc[:resistance], tc[:reactance], tc[:connect_type], tc[:install_type], tc.phases]
+    #   end
+    # end
+
+    puts "Writing #{all_configs.length} configurations"
     out_wrangler = new outfilename: outfilename, lines: all_configs
     out_wrangler.sign "GLMWrangler::#{__method__}"
     out_wrangler.write
@@ -181,7 +204,7 @@ class GLMWrangler
   # put a line after all other comments at the top of the .glm that notes
   # how the .glm was wrangled
   def sign(commands = @commands)
-    commands.join(' ') if commands.respond_to? :join
+    commands = commands.join(' ') if commands.respond_to? :join
     first_content_i = @lines.index {|l| !l.blank? && !l.comment?}
     raise "Couldn't find any non-blank, non-comment lines in the .glm" if first_content_i.nil?
     signature1 = "// Wrangled by GLMWrangler #{VERSION} from #{@infilename} to #{@outfilename}"
@@ -193,7 +216,7 @@ class GLMWrangler
   # write out a DOT file based on the parsed objects
   def write
     if @outfilename
-      puts "Writing #{File.basename(@outfilename)}"
+      puts "Writing #{@outfilename}"
       File.open(@outfilename, 'w') {|f| @lines.each {|l| f.puts l} }
     else
       puts "No destination file given, exiting without writing."
@@ -379,53 +402,101 @@ class GLMWrangler
     # and sort them by rating.  Ignore the "load"/"CTTF" transformers added by Feeder_Generator
     # for commercial loads, since they are set up in a load-specific way
     xfmrs = find_by_groupid('Distribution_Trans').select {|xfmr| xfmr[:name] !~ /load/}
-    configs = xfmrs.map {|xfmr| find_by_name(xfmr[:configuration]).first}.uniq.sort_by {|c| c.rating}
-    # puts "Found #{configs.length} viable xfmr configurations"
+    imported_configs = []
+
+    # Get the menu of usable transformer_configurations from a previously prepared menu .glm
+    # (See GLMWrangler::xfmr_config_menu for how the file was created)
+    config_file = File.join(DATA_DIR, 'xfmr_config_menu.glm')
+    configs = self.class.new(infilename: config_file).find_by_class 'transformer_configuration'
+    configs.sort_by! {|c| c.rating}
 
     # Keep track of some things for logging purposes
     counts = Hash.new 0
     counts[:total] = xfmrs.length
-    [:changed, :unchanged, :failed].each do |k|
+    [:changed, :unchanged, :failed, :imported].each do |k|
       counts[k] = 0
     end
-    undersized = Hash.new 0
+    wrongsized = {under: Hash.new(0), over: Hash.new(0)}
 
     xfmrs.each do |xfmr|
       # Mark that these are the transformers where we will track aging
       xfmr[:groupid] = 'Aging_Trans'
 
-      # Find an appropriate new transformer_configuration for this xfmr given its max load
-      # from the baseline run.  The new config may be the same as the old, of course.
+      # Find reasonable candidate configurations for this xfmr given its baseline max_load
       max_load = max_loads[xfmr[:name]].to_f
       old_config = find_by_name(xfmr[:configuration]).first
-      choices = configs.select {|candidate| candidate.similar_to? old_config}
-      # It may be that none are big enough, in which case we just choose the last candidate
-      # (which because of the sorting will be the candidate with the largest rating)
-      # If there were no choices (that is, no similar configs) new_config will wind up being nil
-      new_config = choices.find {|candidate| candidate.rating >= max_load} || choices.last
-
-      # Change the xfmr's config if we've found a better one,
-      # and leave a note about what we've done in any case.
       old_rating = old_config.rating
-      if new_config
-        if new_config == old_config
+      new_config = nil
+      choices = configs.select {|candidate| candidate.similar_to? old_config}
+
+      if choices.empty?
+        xfmr[:comment0] = "// Could not find any appropriate configuration; leaving original with a rating of #{old_rating}kVA given a max load of #{max_load}kVA"
+        counts[:failed] += 1
+      else
+        # Find the best new rating for this xfmr (that is, the lowest rating that is larger than
+        # its baseline max_load).
+        # It may be that none are big enough, in which case we just choose the last candidate
+        # (which because of the sorting will be the candidate with the largest rating)
+        new_rating = (choices.find {|candidate| candidate.rating >= max_load} || choices.last).rating
+        if new_rating == old_rating
+          # The best available rating is the one it already has, so don't change anything
           xfmr[:comment0] = "// Transformer configuration unchanged; rated #{old_rating}kVA given a max load of #{max_load}kVA"
           counts[:unchanged] += 1
         else
+          # There is a better rating available than the xfmr's current rating
+          # Narrow down choices to just the ones that have the right rating
+          choices.select! {|c| c.rating == new_rating}
+          choice_names = choices.map {|c| c[:name]}
+          # Find any local choices (ones native to this .glm) that are as good a match
+          # as the best one we found from the menu of choices
+          local_choices = find_by_class('transformer_configuration').select do |c|
+            c.rating == new_rating && c.similar_to?(old_config)
+          end
+
+          # If there are any local choices, use those, otherwise "import" one from the menu
+          # If there's more than one choice, we take the middle one by impedance
+          if local_choices.empty?
+            new_config = choices.mid_by {|c| c.impedance}
+            imported_configs << new_config
+            how_changed = 'via import'
+            counts[:imported] += 1
+          else
+            new_config = local_choices.mid_by {|c| c.impedance}
+            how_changed = 'locally'
+          end
+
+          # It may be that we are using a 12.47kV xfmr in place of a 12.5kV xfmr (or vice-versa)
+          # in which case we want to tweak the primary voltage on the imported configuration
+          # to match the local feeder's nominal voltage
+          if new_config[:primary_voltage] != old_config[:primary_voltage]
+            puts "Adjusting primary voltage on #{new_config[:name]} from #{new_config[:primary_voltage]} to #{old_config[:primary_voltage]}"
+            new_config[:primary_voltage] = old_config[:primary_voltage]
+          end
+
           xfmr[:configuration] = new_config[:name]
-          xfmr[:comment0] = "// Transformer configuration changed from t_c_#{old_config[:name] =~ /\d+$/} (#{old_rating}kVA) to #{new_config.rating}kVA given a max load of #{max_load}kVA"
+          xfmr[:comment0] = "// Transformer configuration changed #{how_changed} from #{old_config[:name]} (#{old_rating}kVA) to #{new_config.rating}kVA given a max load of #{max_load}kVA"
           counts[:changed] += 1
         end
-      else
-        xfmr[:comment0] = "// Could not find any appropriate configuration; leaving original with a rating of #{old_rating}kVA given a max load of #{max_load}kVA"
-        counts[:failed] += 1
       end
-      undersized_by = max_load - (new_config.rating || old_config.rating)
+
+      used_rating = (new_config || old_config).rating
+      undersized_by = max_load - used_rating
       if undersized_by > 0
         xfmr[:comment0] += " (Undersized by #{'%.1f' % undersized_by}kVA!)"
-        undersized[xfmr[:name]] = undersized_by
+        wrongsized[:under][xfmr[:name]] = undersized_by
+      # Count an xfmr as oversized if it is bigger than 5kVA
+      # and is rated at more than twice its baseline max_load
+      elsif used_rating > 5 && (oversized_by = -undersized_by) >= max_load
+        xfmr[:comment0] += " (Oversized by #{'%.1f' % oversized_by}kVA!)"
+        wrongsized[:over][xfmr[:name]] = oversized_by
       end
     end
+
+    # Add the imported configs to the current wrangler
+    imported_configs.uniq!
+    imported_configs.sort_by! {|c| c[:name]}
+    last_config_i = @lines.index(find_by_class('transformer_configuration').last)
+    @lines.insert last_config_i, *imported_configs
 
     if log_file
       out = Hash.new 'N/A'
@@ -433,16 +504,19 @@ class GLMWrangler
       out[:infile] = File.basename(@infilename)
       out[:region] = region
       out.merge! counts
-      if undersized.empty?
-        [:undersized, :most_undersized_id, :most_undersized_by, :avg_undersized_by].each do |k|
-          out[k] = 'N/A'
+      wrongsized.each do |underover, hsh|
+        uo = underover.to_s
+        if hsh.empty?
+          ["#{uo}sized", "most_#{uo}sized_id", "most_#{uo}sized_by", "avg_#{uo}sized_by"].each do |k|
+            out[k] = 'N/A'
+          end
+        else
+          out["#{uo}sized"] = hsh.length
+          most_wrongsized = hsh.max_by {|k, v| v}
+          out["most_#{uo}sized_id"] = most_wrongsized.first
+          out["most_#{uo}sized_by"] = '%.1f' % most_wrongsized.last
+          out["avg_#{uo}sized_by"] = '%.1f' % (hsh.values.inject(:+).to_f / hsh.length)
         end
-      else
-        out[:undersized] = undersized.length
-        most_undersized = undersized.max_by {|k, v| v}
-        out[:most_undersized_id] = most_undersized.first
-        out[:most_undersized_by] = '%.1f' % most_undersized.last
-        out[:avg_undersized_by] = '%.1f' % (undersized.values.inject(:+).to_f / undersized.length)
       end
       write_headers = !File.exist?(log_file)
       CSV.open(log_file, 'a+', headers: out.keys, write_headers: write_headers) do |log_f|
@@ -622,7 +696,7 @@ class GLMObject < Hash
     if /^\s*(\w+\s+)?object\s+(\w+)(:(\d*))?\s+{/.match(dec_line) && !$2.nil?
       @class = $2
       self[:id] = $1.strip unless $1.nil? # this will usually be nil, but some objects are named
-      self[:num] = $4 unless $4.nil? # note that self[:num] will include the colon before the actual number
+      self[:num] = $4 unless $4.nil?
     end
     
     until done do
@@ -754,10 +828,11 @@ end
 module GLMObject::TransformerConfiguration
   PHASES = %w[A B C]
   # This is like the standard xfmr sizes from IEEE Std C57.12.20-2011 except that:
-  # We add 5, to accomodate 15kVA 3ph xfmrs and very small single-phase loads
-  # We substitute 175 for 167 and 337.5 for 333 since there are no 167 or 333kVA
-  # xfmrs in the GridLAB-D taxonomy feeders
-  STD_KVA_1PH = [5, 10, 15, 25, 37.5, 50, 75, 100, 175, 250, 337.5, 500]
+  # - We add 5, to accomodate 15kVA 3ph xfmrs and very small single-phase loads
+  # - We substitute 175 for 167 and 337.5 for 333 since there are no 167 or 333kVA
+  #   xfmrs in the GridLAB-D taxonomy feeders
+  # - We add 750 and 1000 on the high end since we occasionally need an xfmr that big
+  STD_KVA_1PH = [5, 10, 15, 25, 37.5, 50, 75, 100, 175, 250, 337.5, 500, 750, 1000]
 
   # Get the overall 3ph rating for the configuration
   def rating
@@ -792,9 +867,12 @@ module GLMObject::TransformerConfiguration
   # Determine if another config is similar in all important ways except rating
   # That is, they must have the same type, voltage, and rated phases
   def similar_to?(other)
-    return false if [:connect_type, :install_type, :primary_voltage, :secondary_voltage].any? do |prop|
+    return false if [:connect_type, :install_type, :secondary_voltage].any? do |prop|
       self[prop] != other[prop]
     end
+
+    # Allow 12.47kV and 12.5kV configurations to be used interchangably
+    return false if (self[:primary_voltage].to_i - other[:primary_voltage].to_i).abs > 300
 
     self.phases == other.phases
   end
@@ -809,6 +887,10 @@ module GLMObject::TransformerConfiguration
     r = per_phase_rating
     # Being loose with the matching here to account for any floating-point oddness
     STD_KVA_1PH.find {|std| (std - r).abs <= 1}
+  end
+
+  def impedance
+    Math.sqrt(self[:resistance].to_f**2 + self[:reactance].to_f**2)
   end
 end
 
