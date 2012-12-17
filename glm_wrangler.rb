@@ -44,7 +44,7 @@ require 'csv'
 
 version_pieces = RUBY_VERSION.split '.'
 unless version_pieces[0] == '1' && version_pieces[1] == '9'
-  raise "This script was written for use with ruby 1.9; in particular, it relies on Hash being ordered to avoid reordering the properties of your .glm objects.  You can erase this check from the script and use with other versions at your own risk."
+  raise "This script was written for use with ruby 1.9 and will not run correctly on older versions; sorry."
 end
 
 class Object
