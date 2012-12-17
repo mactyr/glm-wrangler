@@ -85,7 +85,7 @@ class GLMWrangler
   # Do "the works" (parse, edit according to the given commands, sign and output)
   # on a single .glm file
   def self.process(infilename, outfilename = nil, *commands)
-    puts "Processing file: #{File.basename(infilename)}"
+    puts "Processing file: #{infilename}"
     wrangler = new infilename: infilename, outfilename: outfilename, commands: commands
     wrangler.run
     wrangler.sign
