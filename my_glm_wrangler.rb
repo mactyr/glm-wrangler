@@ -363,6 +363,7 @@ class MyGLMWrangler < GLMWrangler
   # specified penetration fraction is reached.  peak_load is expected in kW.
   # Also add the players necessary to support each profile that's used.
   def add_sc_solar(penetration, region)
+    return if penetration == 0
     base_feeder_name = File.basename(@infilename)[0, 9]
     region.downcase!
 
