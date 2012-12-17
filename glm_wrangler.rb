@@ -213,7 +213,7 @@ class GLMWrangler
     @lines.insert first_content_i, signature1, signature2, command_str, ''
   end
   
-  # write out a DOT file based on the parsed objects
+  # Write out the .glm file based on @lines
   def write
     if @outfilename
       puts "Writing #{@outfilename}"
