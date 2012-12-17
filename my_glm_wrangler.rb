@@ -16,8 +16,8 @@ end
 
 class MyGLMWrangler < GLMWrangler
 
-  DATA_DIR = 'data/'
-  SHARED_PATH = '../shared/'
+  DATA_DIR = 'data'
+  SHARED_DIR = File.join('..', 'shared')
 
   # generate a "menu" of unique transformer_configurations in standard sizes
   # from a folder of .glm objects.
@@ -61,6 +61,14 @@ class MyGLMWrangler < GLMWrangler
     out_wrangler = new outfilename: outfilename, lines: all_configs
     out_wrangler.sign "#{self}::#{__method__}(#{inpath}, #{outfilename})"
     out_wrangler.write
+  end
+
+  def data_file(*path_parts)
+    File.join DATA_DIR, *path_parts
+  end
+
+  def shared_file(*path_parts)
+    File.join SHARED_DIR, *path_parts
   end
 
   # Remove objects from the top layer of the .glm that belong to a class
@@ -109,14 +117,16 @@ class MyGLMWrangler < GLMWrangler
   # Update the #includes and voltage players to find their schedules in the shared directory,
   # not the .glm's home directory
   def use_shared_path
+    include_str = '#include "'
+    include_re = Regexp.new "^#{include_str}(.*)"
     @lines.each_with_index do |l, i|
-      if l =~ /^#include "/
-        @lines[i] = l.sub '#include "', '#include "' + SHARED_PATH
+      if l =~ include_re
+        @lines[i] = include_str + shared_file($1)
       end
     end
 
     find_by_name('network_node').first.nested.each do |obj|
-      obj[:file] = SHARED_PATH + obj[:file] if obj[:file]
+      obj[:file] = shared_file(obj[:file]) if obj[:file]
     end
   end
 
@@ -126,7 +136,7 @@ class MyGLMWrangler < GLMWrangler
     
     # Get the location metadata for the weather region from .csv,
     # and complain if it can't be found
-    CSV.foreach(DATA_DIR + 'weather_locations.csv', headers: true, header_converters: :symbol) do |row|
+    CSV.foreach(data_file('weather_locations.csv'), headers: true, header_converters: :symbol) do |row|
       if row[:region].downcase == region
         loc = row
         break
@@ -141,7 +151,7 @@ class MyGLMWrangler < GLMWrangler
 
     # Update the climate object
     climate[:name] = "\"CA-#{region.capitalize}\""
-    climate[:tmyfile] = "#{SHARED_PATH}#{region}_weather_full_year.csv"
+    climate[:tmyfile] = shared_file "#{region}_weather_full_year.csv"
     climate[:reader] = "#{region}_csv_reader"
     climate.delete :interpolate
 
@@ -217,7 +227,8 @@ class MyGLMWrangler < GLMWrangler
   def rerate_dist_xfmrs(region, log_file = nil)
     # Get the max loading for each xfmr
     max_loads = {}
-    CSV.foreach(DATA_DIR + "xfmr_kva/#{File.basename(@infilename)[0,10]}#{region}_xfmr_kva.csv", headers: true) do |r|
+    max_load_file = data_file 'xfmr_kva', "#{File.basename(@infilename)[0,10]}#{region}_xfmr_kva.csv"
+    CSV.foreach(max_load_file, headers: true) do |r|
       max_loads[r['name']] = r['max']
     end
 
@@ -229,7 +240,7 @@ class MyGLMWrangler < GLMWrangler
 
     # Get the menu of usable transformer_configurations from a previously prepared menu .glm
     # (See ::xfmr_config_menu for how the file was created)
-    config_file = File.join(DATA_DIR, 'xfmr_config_menu.glm')
+    config_file = data_file('xfmr_config_menu.glm')
     configs = self.class.new(infilename: config_file).find_by_class 'transformer_configuration'
     configs.sort_by! {|c| c.rating}
 
@@ -357,7 +368,7 @@ class MyGLMWrangler < GLMWrangler
 
     # find the peak load of this feeder, to gauge penetration against
     peak_load = nil
-    CSV.foreach(DATA_DIR + 'baseline_peak_loads.csv', :headers => true) do |row|
+    CSV.foreach(data_file('baseline_peak_loads.csv'), :headers => true) do |row|
       peak_load = row['max_load_kw'].to_i if row['name'] == "#{base_feeder_name}_base_#{region}"
     end
     raise "Couldn't find peak load for #{base_feeder_name} in #{region}" if peak_load.nil?
@@ -365,7 +376,7 @@ class MyGLMWrangler < GLMWrangler
     # load installation capacity values from a .csv
     # in the hash, the key is the InverterID and the value is the rated capacity in kW
     capacities = {}
-    CSV.foreach(DATA_DIR + 'inverter_capacities.csv', :headers => true) do |row|
+    CSV.foreach(data_file('inverter_capacities.csv'), :headers => true) do |row|
       capacities[row['SGInverter'].to_i] = row['InvCapEst'].to_f
     end
 
@@ -373,7 +384,7 @@ class MyGLMWrangler < GLMWrangler
     # In the hash, the key is the meter node's name and the value is the
     # profile (that is, inverter) ID
     profiles = {}
-    CSV.foreach(DATA_DIR + "sc_match/#{base_feeder_name}_#{region}.csv", headers: true) do |r|
+    CSV.foreach(data_file("sc_match/#{base_feeder_name}_#{region}.csv"), headers: true) do |r|
       profiles[r['node']] = r['SGInverter'].to_i
     end
 
