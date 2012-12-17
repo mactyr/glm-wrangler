@@ -175,11 +175,15 @@ class GLMWrangler
     @lines.insert first_content_i, *sig
   end
   
+  def to_s
+    @lines.map {|l| l.to_s}.join
+  end
+
   # Write out the .glm file based on @lines
   def write
     if @outfilename
       puts "Writing #{@outfilename}"
-      File.open(@outfilename, 'w') {|f| @lines.each {|l| f.puts l} }
+      File.write @outfilename, to_s
     else
       puts "No destination file given, exiting without writing."
     end
