@@ -83,6 +83,15 @@ class GLMWrangler
   end
   private_class_method :glms_in_path
 
+  # Kick things off based on command line parameters
+  # If the first argument in the array is recognized as a GLMWrangler class method,
+  # it will be called with the remaining arguments as parameters
+  # Otherwise we default to calling ::process on all the arguments
+  def self.start_from_cli(args = ARGV)
+    method_sym = args.first.to_sym
+    respond_to?(method_sym) ? send(method_sym, *args[1..-1]) : process(*args)
+  end
+
   # Do "the works" (parse, edit according to the given commands, sign and output)
   # on a single .glm file
   def self.process(infilename, outfilename = nil, *commands)
@@ -896,9 +905,4 @@ end
 
 # Main execution of the script.  Just grabs the parameters and tells
 # GLMWrangler to do its thing
-method_sym = ARGV.first.to_sym
-if GLMWrangler.respond_to? method_sym
-  GLMWrangler.send method_sym, *ARGV[1..-1]
-else
-  GLMWrangler.process *ARGV
-end
+GLMWrangler.start_from_cli
