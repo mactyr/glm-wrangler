@@ -456,6 +456,9 @@ class MyGLMWrangler < GLMWrangler
 
 end
 
+# This module (and any module named after a GridLAB-D class in this way) will be
+# added to any GLMObject with a matching @class (in this case, 'transformer_configuration').
+# See GLMObject#initialize for details on how it's done.
 module GLMWrangler::GLMObject::TransformerConfiguration
   PHASES = %w[A B C]
   # This is like the standard xfmr sizes from IEEE Std C57.12.20-2011 except that:
