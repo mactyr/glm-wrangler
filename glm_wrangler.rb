@@ -120,12 +120,12 @@ class GLMWrangler
     @outfilename = options[:outfilename]
     @commands = options[:commands]
     @lines = []
-    parse! if @infilename
+    parse if @infilename
     @lines += options[:lines] || []
   end
   
   # Parse the .glm input file into ruby objects
-  def parse!
+  def parse
     infile = File.open @infilename
     
     while l = infile.gets do    
