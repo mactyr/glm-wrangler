@@ -650,7 +650,7 @@ end
 # base class for any object we care about in a .glm file
 # GLMObject basically just parses lines from the input file into
 # a key/value in its Hash-nature
-class GLMObject < Hash
+class GLMWrangler::GLMObject < Hash
   TAB = " " * 2
   
   attr_reader :nested
@@ -834,7 +834,7 @@ class GLMObject < Hash
   
 end
 
-module GLMObject::TransformerConfiguration
+module GLMWrangler::GLMObject::TransformerConfiguration
   PHASES = %w[A B C]
   # This is like the standard xfmr sizes from IEEE Std C57.12.20-2011 except that:
   # - We add 5, to accomodate 15kVA 3ph xfmrs and very small single-phase loads
