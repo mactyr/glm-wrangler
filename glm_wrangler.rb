@@ -159,13 +159,20 @@ class GLMWrangler
   # put a line after all other comments at the top of the .glm that notes
   # how the .glm was wrangled
   def sign(commands = @commands)
-    commands = commands.join(' ') if commands.respond_to? :join
     first_content_i = @lines.index {|l| !l.blank? && !l.comment?}
     raise "Couldn't find any non-blank, non-comment lines in the .glm" if first_content_i.nil?
-    signature1 = "// Wrangled by #{self.class} (using GLMWrangler #{VERSION}) from #{@infilename} to #{@outfilename}"
-    signature2 = "// by #{ENV['USERNAME'] || ENV['USER']} at #{Time.now.getlocal}"
-    command_str = '// Wrangler commands: ' + (commands.blank? ? '[no commands - defaulted to interactive session]' : commands)
-    @lines.insert first_content_i, signature1, signature2, command_str, ''
+
+    commands = commands.join(' ') if commands.respond_to? :join
+    infilename = @infilename || '[objects found or created at runtime]'
+
+    sig = []
+    sig << "// Wrangled by #{self.class} (using GLMWrangler #{VERSION})"
+    sig << "// from #{infilename} to #{@outfilename}"
+    sig << "// by #{ENV['USERNAME'] || ENV['USER']} at #{Time.now.getlocal}"
+    sig << "// Wrangler commands: #{commands.blank? ? '[no commands - defaulted to interactive session]' : commands}"
+    sig << ''
+
+    @lines.insert first_content_i, *sig
   end
   
   # Write out the .glm file based on @lines
