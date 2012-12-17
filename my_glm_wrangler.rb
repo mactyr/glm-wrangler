@@ -1,3 +1,9 @@
+#!/usr/bin/env ruby
+
+# This software is (c) 2012 Michael A. Cohen
+# It is released under the simplified BSD license, which can be found at:
+# http://www.opensource.org/licenses/BSD-2-Clause
+
 require_relative 'glm_wrangler'
 
 class Array
