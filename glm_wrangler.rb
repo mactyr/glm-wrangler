@@ -176,7 +176,7 @@ class GLMWrangler
   end
   
   def to_s
-    @lines.map {|l| l.to_s}.join
+    @lines.map {|l| s = l.to_s; s.end_with?("\n") ? s : s + "\n"}.join
   end
 
   # Write out the .glm file based on @lines
