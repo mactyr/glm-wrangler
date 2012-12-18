@@ -168,7 +168,7 @@ class MyGLMWrangler < GLMWrangler
   end
 
   # set up recorders/collectors/etc for our baseline run
-  def baseline_recorders(region)
+  def setup_recorders(style, region)
     sub_rec = find_by_class('recorder').first
     raise "Substation recorder wasn't where I expected" unless sub_rec[:parent] == 'substation_transformer'
     rec_i = @lines.index(sub_rec)
@@ -186,40 +186,16 @@ class MyGLMWrangler < GLMWrangler
 
     remove_classes_from_top_layer 'recorder', 'collector', 'billdump'
 
-    recs = [sub_rec]
-
-    # Xfmr loading recorder
-    recs << GLMObject.new(self, {
-      class: 'group_recorder',
-      file: file_base + 'xfmr_kva.csv',
-      group: '"class=transformer"',
-      property: 'power_in',
-      complex_part: 'MAG',
-      interval: interval,
-      limit: limit
-    })
-
-    # Climate verification recorder
-    recs << GLMObject.new(self, {
-      class: 'recorder',
-      file: file_base + 'climate.csv',
-      parent: find_by_class('climate').first[:name],
-      property: 'solar_flux,temperature,humidity,wind_speed',
-      interval: interval,
-      limit: limit
-    })
-
-    # Fault check
-    recs << GLMObject.new(self, {
-      class: 'fault_check',
-      check_mode: 'ONCHANGE',
-      output_filename: file_base + 'fault.txt'
-    })
+    # Add custom baseline or sc (production run) recorders as dictated
+    # by the style parameter
+    recs = [sub_rec] + send(:"#{style}_recorders", file_base, interval, limit)
 
     # Add blank lines before each recorder
     recs = recs.inject([]) {|new_recs, rec| new_recs << '' << rec}
 
+    puts "Before: #{@lines.length}"
     @lines.insert rec_i, *recs
+    puts "After: #{@lines.length}"
 
     # adjust EOLVolt multi-recorder file destinations
     find_by_class('multi_recorder').each do |obj|
@@ -229,12 +205,16 @@ class MyGLMWrangler < GLMWrangler
     end
   end
 
-  def setup_baseline(region)
+  def common_setup(region)
     full_year_clock
     use_custom_weather region
-    baseline_recorders region
     remove_service_status_players
     use_shared_path
+  end
+
+  def setup_baseline(region)
+    common_setup region
+    setup_recorders :baseline, region
     remove_extra_blanks_from_top_layer
   end
 
@@ -486,6 +466,50 @@ class MyGLMWrangler < GLMWrangler
     @lines << "// to reach a target penetration of #{'%.1f' % (penetration * 100)}% against a peak load of #{'%.1f' % peak_load}kW"
   end
 
+  private
+  # These are private because they're helper methods that return GLMObjects
+  # or Arrays of objects, and wouldn't make sense to call from the cli
+
+  def fault_check(file_base)
+    GLMObject.new(self, {
+      class: 'fault_check',
+      check_mode: 'ONCHANGE',
+      output_filename: file_base + 'fault.txt'
+    })
+  end
+
+  def baseline_recorders(file_base, interval, limit)
+    recs = []
+
+    recs << GLMObject.new(self, {
+      class: 'group_recorder',
+      file: file_base + 'xfmr_kva.csv',
+      group: '"class=transformer"',
+      property: 'power_in',
+      complex_part: 'MAG',
+      interval: interval,
+      limit: limit
+    })
+
+    # Climate verification recorder
+    recs << GLMObject.new(self, {
+      class: 'recorder',
+      file: file_base + 'climate.csv',
+      parent: find_by_class('climate').first[:name],
+      property: 'solar_flux,temperature,humidity,wind_speed',
+      interval: interval,
+      limit: limit
+    })
+
+    # Fault check
+    recs << fault_check(file_base)
+  end
+
+  def sc_recorders(file_base, interval, limit)
+    recs = []
+
+    recs << fault_check(file_base)
+  end
 end
 
 # This module (and any module named after a GridLAB-D class in this way) will be
