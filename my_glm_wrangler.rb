@@ -186,7 +186,10 @@ class MyGLMWrangler < GLMWrangler
 
     remove_classes_from_top_layer 'recorder', 'collector', 'billdump'
 
-    xfmr_group_rec = GLMObject.new(self, {
+    recs = [sub_rec]
+
+    # Xfmr loading recorder
+    recs << GLMObject.new(self, {
       class: 'group_recorder',
       file: file_base + 'xfmr_kva.csv',
       group: '"class=transformer"',
@@ -196,7 +199,8 @@ class MyGLMWrangler < GLMWrangler
       limit: limit
     })
 
-    climate_rec = GLMObject.new(self, {
+    # Climate verification recorder
+    recs << GLMObject.new(self, {
       class: 'recorder',
       file: file_base + 'climate.csv',
       parent: find_by_class('climate').first[:name],
@@ -205,7 +209,17 @@ class MyGLMWrangler < GLMWrangler
       limit: limit
     })
 
-    @lines.insert rec_i, '', sub_rec, '', xfmr_group_rec, '', climate_rec
+    # Fault check
+    recs << GLMObject.new(self, {
+      class: 'fault_check',
+      check_mode: 'ONCHANGE',
+      output_filename: file_base + 'fault.txt'
+    })
+
+    # Add blank lines before each recorder
+    recs = recs.inject([]) {|new_recs, rec| new_recs << '' << rec}
+
+    @lines.insert rec_i, *recs
 
     # adjust EOLVolt multi-recorder file destinations
     find_by_class('multi_recorder').each do |obj|
