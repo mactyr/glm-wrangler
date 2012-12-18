@@ -204,6 +204,16 @@ class GLMWrangler
     pry
   end
 
+  def remove_extra_blanks_from_top_layer
+    dupe = []
+    @lines.each_index do |i|
+      unless @lines[i].blank? && @lines[i-1].blank?
+        dupe << @lines[i]
+      end
+    end
+    @lines = dupe
+  end
+
 end
 
 # base class for any object we care about in a .glm file

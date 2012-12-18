@@ -82,16 +82,6 @@ class MyGLMWrangler < GLMWrangler
     players.each {|p| @lines.delete(p) if p[:property] == 'service_status'}
   end
 
-  def remove_extra_blanks_from_top_layer
-    dupe = []
-    @lines.each_index do |i|
-      unless @lines[i].blank? && @lines[i-1].blank?
-        dupe << @lines[i]
-      end
-    end
-    @lines = dupe
-  end
-
   def full_year_clock
     # Unfortunately clock is not an object in GridLAB-D so we can't do this the easy way
     # (that is, by setting a GLMObject's properties) but it's not too bad with @lines
