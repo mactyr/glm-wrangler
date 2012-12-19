@@ -18,6 +18,9 @@ class MyGLMWrangler < GLMWrangler
 
   DATA_DIR = 'data'
   SHARED_DIR = File.join('..', 'shared')
+  AGING_GROUPID = 'Aging_Trans'
+  VOLTAGE_GROUPID = 'Volt_Node'
+  DAY_INTERVAL = 60 * 60 * 24
 
   # generate a "menu" of unique transformer_configurations in standard sizes
   # from a folder of .glm objects.
@@ -134,9 +137,7 @@ class MyGLMWrangler < GLMWrangler
     end
     raise "Can't find location data for region #{region}" if loc.nil?
 
-    climates = find_by_class 'climate'
-    raise "I need exactly one climate object" if climates.length != 1
-    climate = climates.first
+    climate = find_by_class 'climate', 1
     climate_i = @lines.index climate
 
     # Update the climate object
@@ -163,10 +164,15 @@ class MyGLMWrangler < GLMWrangler
     raise "Substation recorder wasn't where I expected" unless sub_rec[:parent] == 'substation_transformer'
     rec_i = @lines.index(sub_rec)
 
-    # base any recorders we add off of the substation recorder
-    file_base = sub_rec[:file][0, 13].sub('t0', "base_#{region.downcase}")
-    file_base = "#{file_base[0..-2]}/#{file_base}" # Putting all recordings in a subdir named after the model
+    # Setup an incomplete file name for all recorders to send their output to
+    # The filename puts all the output in a directory named after the model file
+    # Each recorder has to complete the filename for itself, of course
+    out_basename = File.basename @outfilename, EXT
+    file_base = File.join out_basename, "#{out_basename}_"
     sub_rec[:file] = file_base + 'substation_power.csv'
+
+    # default other recorders to having the same interval and limit
+    # as the substation recorder
     interval = sub_rec[:interval]
     limit = sub_rec[:limit]
 
@@ -183,9 +189,7 @@ class MyGLMWrangler < GLMWrangler
     # Add blank lines before each recorder
     recs = recs.inject([]) {|new_recs, rec| new_recs << '' << rec}
 
-    puts "Before: #{@lines.length}"
     @lines.insert rec_i, *recs
-    puts "After: #{@lines.length}"
 
     # adjust EOLVolt multi-recorder file destinations
     find_by_class('multi_recorder').each do |obj|
@@ -208,6 +212,14 @@ class MyGLMWrangler < GLMWrangler
     remove_extra_blanks_from_top_layer
   end
 
+  def setup_sc(region, penetration)
+    common_setup region
+    setup_recorders :sc, region
+    rerate_dist_xfmrs region, 'setup_sc_xfmr_rerate_log.txt'
+    add_sc_solar region, penetration
+    remove_extra_blanks_from_top_layer
+  end
+
   def rerate_dist_xfmrs(region, log_file = nil)
     # Get the max loading for each xfmr
     max_loads = {}
@@ -219,7 +231,7 @@ class MyGLMWrangler < GLMWrangler
     # Find all transformer_configurations used by "Distribution Transformers"
     # and sort them by rating.  Ignore the "load"/"CTTF" transformers added by Feeder_Generator
     # for commercial loads, since they are set up in a load-specific way
-    xfmrs = find_by_groupid('Distribution_Trans').select {|xfmr| xfmr[:name] !~ /load/}
+    xfmrs = find_by_groupid('Distribution_Trans').select {|xfmr| xfmr.real?}
     imported_configs = []
 
     # Get the menu of usable transformer_configurations from a previously prepared menu .glm
@@ -236,9 +248,18 @@ class MyGLMWrangler < GLMWrangler
     end
     wrongsized = {under: Hash.new(0), over: Hash.new(0)}
 
+    climate_name = find_by_class('climate', 1)[:name]
     xfmrs.each do |xfmr|
-      # Mark that these are the transformers where we will track aging
-      xfmr[:groupid] = 'Aging_Trans'
+      # Use the thermal aging model for all SINGLE_PHASE_CENTER_TAPPED xfmrs we encounter
+      # (the GridLAB-D thermal model only works with this type of xfmr for now)
+      # if xfmr.configuration[:connect_type] == 'SINGLE_PHASE_CENTER_TAPPED'
+      #   xfmr[:groupid] = AGING_GROUPID
+      #   xfmr[:use_thermal_model] = 'TRUE'
+      #   xfmr[:climate] = climate_name
+      #   xfmr[:aging_granularity] = 300
+      #   xfmr[:percent_loss_of_life] = 0
+      #   xfmr[:coolant_type] = 'MINERAL_OIL'
+      # end
 
       # Find reasonable candidate configurations for this xfmr given its baseline max_load
       max_load = max_loads[xfmr[:name]].to_f
@@ -346,7 +367,7 @@ class MyGLMWrangler < GLMWrangler
   # Add Solar City generation profiles to the desired load_type until the
   # specified penetration fraction is reached.  peak_load is expected in kW.
   # Also add the players necessary to support each profile that's used.
-  def add_sc_solar(penetration, region)
+  def add_sc_solar(region, penetration)
     return if penetration == 0
     base_feeder_name = File.basename(@infilename)[0, 9]
     region.downcase!
@@ -498,7 +519,85 @@ class MyGLMWrangler < GLMWrangler
   def sc_recorders(file_base, interval, limit)
     recs = []
 
+    # Real power loss recorders
+    loss_types = {
+      'overhead_line' => 'OHL',
+      'underground_line' => 'UGL',
+      'triplex_line' => 'TPL',
+      'transformer' => 'TFR'
+    }
+    loss_types.each do |ltype, abbrev|
+      recs << GLMObject.new(self, {
+        class: 'collector',
+        group: "\"class~#{ltype}\"",
+        property: 'sum(power_losses.real)',
+        interval: interval,
+        limit: limit,
+        file: file_base + abbrev + '_losses.csv'
+      })
+    end
+
+    # Aging_Transformer loss of life and replacements
+    # All we really care about is these values at the end of the run,
+    # so we'll only collect them once a day to save space
+    # xfmr_props = {
+    #   'percent_loss_of_life' => 'pct_lol',
+    #   'transformer_replacement_count' => 'replacements'
+    # }
+    # xfmr_props.each do |prop, abbrev|
+    #   recs << GLMObject.new(self, {
+    #     class: 'group_recorder',
+    #     group: "\"groupid=#{AGING_GROUPID}\"",
+    #     property: prop,
+    #     interval: DAY_INTERVAL,
+    #     limit: limit,
+    #     file: file_base + 'xfmr_' + abbrev + '.csv'
+    #   })
+    # end
+
+    # Tap-change recorders.  Here again, we only care about the final total,
+    # so we'll just record once per day
+    find_by_class('regulator').each do |reg|
+      recs << GLMObject.new(self, {
+        class: 'recorder',
+        parent: reg[:name],
+        property: 'tap_A_change_count,tap_B_change_count,tap_C_change_count',
+        interval: DAY_INTERVAL,
+        limit: limit,
+        file: file_base + reg[:name][-4..-1] + '.csv'
+      })
+    end
+
+    # Setup groupid for nodes where we want to record voltages
+    # (which is any node that is a parent of a "real" transformer)
+    xfmrs = find_by_class('transformer').select {|t| t.real? && !t.substation?}
+    xfmrs.map {|t| t.upstream}.uniq.each do |node|
+      raise "Node #{node[:name]} already has groupid #{node[:groudid]}" if node[:groupid]
+      node[:groupid] = VOLTAGE_GROUPID
+    end
+
+    PHASES.each do |ph|
+      recs << GLMObject.new(self, {
+        class: 'group_recorder',
+        group: "\"groupid=#{VOLTAGE_GROUPID}\"",
+        property: "voltage_#{ph}",
+        interval: interval,
+        limit: limit,
+        file: file_base + 'v_profile_' + ph + '.csv'
+      })
+    end
+
     recs << fault_check(file_base)
+  end
+end
+
+# Include this module for any GLMObject class that needs to be able to test
+# whether it is "real" (that is whether it was part of the original taxonomy
+# topology, as opposed to created by Feeder_Generator.m to serve part of
+# a commercial load).
+module GLMWrangler::RealTest
+  def real?
+    self[:name] !~ /load/
   end
 end
 
@@ -506,7 +605,9 @@ end
 # added to any GLMObject with a matching @class (in this case, 'transformer_configuration').
 # See GLMObject#initialize for details on how it's done.
 module GLMWrangler::GLMObject::TransformerConfiguration
-  PHASES = %w[A B C]
+  include GLMWrangler::RealTest
+
+  PHASES = GLMWrangler::PHASES
   # This is like the standard xfmr sizes from IEEE Std C57.12.20-2011 except that:
   # - We add 5, to accomodate 15kVA 3ph xfmrs and very small single-phase loads
   # - We substitute 175 for 167 and 337.5 for 333 since there are no 167 or 333kVA
@@ -557,12 +658,6 @@ module GLMWrangler::GLMObject::TransformerConfiguration
     self.phases == other.phases
   end
 
-  # Is this NOT one of the "fake" transformer configs added by Feeder_Generator.m
-  # to serve sub-components of commercial loads?
-  def real?
-    self[:name] !~ /load/
-  end
-
   def standard_size?
     r = per_phase_rating
     # Being loose with the matching here to account for any floating-point oddness
@@ -571,6 +666,18 @@ module GLMWrangler::GLMObject::TransformerConfiguration
 
   def impedance
     Math.sqrt(self[:resistance].to_f**2 + self[:reactance].to_f**2)
+  end
+end
+
+module GLMWrangler::GLMObject::Transformer
+  include GLMWrangler::RealTest
+
+  def substation?
+    self[:name] == 'substation_transformer'
+  end
+
+  def configuration
+    @wrangler.find_by_name self[:configuration], 1
   end
 end
 

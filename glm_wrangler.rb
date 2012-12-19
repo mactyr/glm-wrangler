@@ -67,6 +67,7 @@ class GLMWrangler
   VERSION = '0.1'.freeze
   OBJ_REGEX = /(^|\s+)object\s+/
   EXT = '.glm'
+  PHASES = %w[A B C]
 
   def self.glms_in_path(path)
     Dir.glob(File.join(path, '*' + EXT))
@@ -191,8 +192,24 @@ class GLMWrangler
 
   def method_missing(meth, *args, &block)
     if meth.to_s =~ /^find_by_(.+)$/
+      # Find all GLMObjects matching the property named at the end of the method name
+      # If a second parameter is passed, this is a hard expectation on the length of
+      # the result set, and any other number of results will raise an exception.
+      # If the expectation is for one object, the object will be returned directly
+      # (that is, not in an array)
+      num_args = args.length
+      raise ArgumentError, "find_by methods expect one or two arguments" unless num_args == 1 || num_args == 2
       prop = $1.to_sym
-      @lines.select {|l| l.is_a?(GLMObject) && l[prop] == args.first}
+      val, expecting = args
+      found = @lines.select {|l| l.is_a?(GLMObject) && l[prop] == val}
+      if expecting
+        if found.length == expecting
+          return found.first if expecting == 1
+        else
+          raise("Found #{found.length} object(s) with #{prop} == #{val} (#{expecting} requested)")
+        end
+      end
+      found
     else
       super # You *must* call super if you don't handle the
             # method, otherwise you'll mess up Ruby's method
@@ -330,7 +347,7 @@ class GLMWrangler::GLMObject < Hash
       when 'id', 'num'
         '' # these are used only in the object declaration line
       else
-        tab(indent + 1) + prop_s + ' ' + val + ";#{@trailing_junk[key]} \n"
+        tab(indent + 1) + prop_s + " #{val};#{@trailing_junk[key]}\n"
       end
     end
     out + tab(indent) + '}' + (@semicolon ? ';' : '') + "\n"
