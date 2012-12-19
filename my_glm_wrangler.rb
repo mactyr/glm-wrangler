@@ -415,11 +415,7 @@ class MyGLMWrangler < GLMWrangler
       raise "Ran out of targets to add solar to" if target.nil?
 
       # Find the Solar City profile corresponding to this target's meter
-      # FIXME: We should be looking for meters OR triplex_meters
-      meter = target.first_upstream 'meter'
-      # Sometimes we have to step up through the meter hierarchy to get past the "fake"
-      # commercial sub-meters that Feeder_Generator adds
-      while meter[:name] =~ /load/ do meter = meter.first_upstream 'meter' end
+      meter = target.location_meter
       profile = profiles[meter[:name]]
       raise "Couldn't find a profile for #{target[:name]} under #{meter[:name]}" if profile.nil?
       profile_cap = capacities[profile]
@@ -430,7 +426,7 @@ class MyGLMWrangler < GLMWrangler
       # Scale up profile if we're installing on a commercial building
       # TODO: Do we need to scale down if we have a "big" profile on a residential home?
       scale = nil
-      if target[:groupid] = 'Commercial'
+      if target[:groupid] == 'Commercial'
         # This is borrowed from PNNL's Feeder_Generator.m
         # The idea is that a reasonable guess for a rating for a commercial system
         # is its area times 0.2 efficiency times 92.902W/sf peak insolation
@@ -474,7 +470,7 @@ class MyGLMWrangler < GLMWrangler
 
     # log how much solar was added at the end of the file
     @lines << ''
-    @lines << "// glm_wrangler.rb's add_sc_solar method added #{'%.1f' % placed[:res]}kW of residential solar"
+    @lines << "// #{self.class}::#{__method__} added #{'%.1f' % placed[:res]}kW of residential solar"
     @lines << "// and #{'%.1f' % placed[:comm]}kW of commercial solar for a total of #{'%.1f' % (placed[:res] + placed[:comm])}kW"
     @lines << "// to reach a target penetration of #{'%.1f' % (penetration * 100)}% against a peak load of #{'%.1f' % peak_load}kW"
   end
@@ -597,7 +593,7 @@ end
 # whether it is "real" (that is whether it was part of the original taxonomy
 # topology, as opposed to created by Feeder_Generator.m to serve part of
 # a commercial load).
-module GLMWrangler::RealTest
+module GLMWrangler::TransformerRealTest
   def real?
     self[:name] !~ /load/
   end
@@ -607,7 +603,7 @@ end
 # added to any GLMObject with a matching @class (in this case, 'transformer_configuration').
 # See GLMObject#initialize for details on how it's done.
 module GLMWrangler::GLMObject::TransformerConfiguration
-  include GLMWrangler::RealTest
+  include GLMWrangler::TransformerRealTest
 
   PHASES = GLMWrangler::PHASES
   # This is like the standard xfmr sizes from IEEE Std C57.12.20-2011 except that:
@@ -672,7 +668,7 @@ module GLMWrangler::GLMObject::TransformerConfiguration
 end
 
 module GLMWrangler::GLMObject::Transformer
-  include GLMWrangler::RealTest
+  include GLMWrangler::TransformerRealTest
 
   def substation?
     self[:name] == 'substation_transformer'
@@ -680,6 +676,31 @@ module GLMWrangler::GLMObject::Transformer
 
   def configuration
     @wrangler.find_by_name self[:configuration], 1
+  end
+end
+
+module GLMWrangler::GLMObject::Meter
+  # As far as I've seen, Feeder_Generator.m doesn't add fake meters,
+  # just fake triplex_meters
+  def real?; true; end
+end
+
+module GLMWrangler::GLMObject::TriplexMeter
+  def real?
+    name = self[:name]
+    name[0, 3] != 'tpm' && name !~ /load/
+  end
+end
+
+module GLMWrangler::GLMObject::House
+  # Find the meter that will determine this house's "location" for the purpose
+  # of being assigned a Solar City generation profile.  The "meter" may also
+  # be a triplex_meter.
+  def location_meter
+    u = upstream
+    until u[:class][-5..-1] == 'meter' && u.real? do u = u.upstream; end
+    raise "Hit the SWING node looking for #{self[:name]}'s location meter" if u[:bustype] == 'SWING'
+    u
   end
 end
 
