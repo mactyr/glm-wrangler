@@ -354,21 +354,20 @@ class GLMWrangler::GLMObject < Hash
   end
   
   def upstream(allow_multiple = false)
+    expected = allow_multiple ? nil : 1
     if @nesting_parent
       u = [@nesting_parent]
     elsif named = self[:parent] || self[:from]
-      u = @wrangler.find_by_name named
+      u = @wrangler.find_by_name named, expected
     elsif self[:name]
-      u = @wrangler.find_by_to(self[:name])
+      u = @wrangler.find_by_to self[:name], expected
     end
     
-    if u.nil? || u.empty?
+    if u.nil? || (u.respond_to?(:empty?) && u.empty?)
       raise "Can't find upstream node for #{self}"
-    elsif !allow_multiple && u.length > 1
-      raise "Found multiple upstream nodes for #{self} but only one was requested"
     end
     
-    allow_multiple ? u : u.first
+    u
   end
   
   # Find the first object of type 'klass' upstream from this object

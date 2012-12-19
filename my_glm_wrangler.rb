@@ -118,7 +118,7 @@ class MyGLMWrangler < GLMWrangler
       end
     end
 
-    find_by_name('network_node').first.nested.each do |obj|
+    find_by_name('network_node', 1).nested.each do |obj|
       obj[:file] = shared_file(obj[:file]) if obj[:file]
     end
   end
