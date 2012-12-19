@@ -147,9 +147,11 @@ class MyGLMWrangler < GLMWrangler
     climate.delete :interpolate
 
     # Create the csv_reader object, add the location metadata to it, and insert it into the .glm
-    reader = GLMObject.new(self, {class: 'csv_reader',
-                                  name: climate[:reader],
-                                  filename: climate[:tmyfile]})
+    reader = new_obj({
+      class: 'csv_reader',
+      name: climate[:reader],
+      filename: climate[:tmyfile]
+    })
     # On second thought, it might be better to store the location and timezone properties
     # in the .csv itself using csv_reader's $property_name=property_value syntax,
     # but this works for now.
@@ -462,7 +464,7 @@ class MyGLMWrangler < GLMWrangler
           :name => "sc_gen_#{profile}",
           :file => "sc_gen_#{profile}.player"
         }
-        players[profile] = GLMObject.new(self, player_props)
+        players[profile] = new_obj player_props
       end
     end
     
@@ -482,7 +484,7 @@ class MyGLMWrangler < GLMWrangler
   # or Arrays of objects, and wouldn't make sense to call from the cli
 
   def fault_check(file_base)
-    GLMObject.new(self, {
+    new_obj({
       class: 'fault_check',
       check_mode: 'ONCHANGE',
       output_filename: file_base + 'fault.txt'
@@ -492,7 +494,7 @@ class MyGLMWrangler < GLMWrangler
   def baseline_recorders(file_base, interval, limit)
     recs = []
 
-    recs << GLMObject.new(self, {
+    recs << new_obj({
       class: 'group_recorder',
       file: file_base + 'xfmr_kva.csv',
       group: '"class=transformer"',
@@ -503,7 +505,7 @@ class MyGLMWrangler < GLMWrangler
     })
 
     # Climate verification recorder
-    recs << GLMObject.new(self, {
+    recs << new_obj({
       class: 'recorder',
       file: file_base + 'climate.csv',
       parent: find_by_class('climate').first[:name],
@@ -527,7 +529,7 @@ class MyGLMWrangler < GLMWrangler
       'transformer' => 'TFR'
     }
     loss_types.each do |ltype, abbrev|
-      recs << GLMObject.new(self, {
+      recs << new_obj({
         class: 'collector',
         group: "\"class~#{ltype}\"",
         property: 'sum(power_losses.real)',
@@ -545,7 +547,7 @@ class MyGLMWrangler < GLMWrangler
     #   'transformer_replacement_count' => 'replacements'
     # }
     # xfmr_props.each do |prop, abbrev|
-    #   recs << GLMObject.new(self, {
+    #   recs << new_obj({
     #     class: 'group_recorder',
     #     group: "\"groupid=#{AGING_GROUPID}\"",
     #     property: prop,
@@ -558,7 +560,7 @@ class MyGLMWrangler < GLMWrangler
     # Tap-change recorders.  Here again, we only care about the final total,
     # so we'll just record once per day
     find_by_class('regulator').each do |reg|
-      recs << GLMObject.new(self, {
+      recs << new_obj({
         class: 'recorder',
         parent: reg[:name],
         property: 'tap_A_change_count,tap_B_change_count,tap_C_change_count',
@@ -577,7 +579,7 @@ class MyGLMWrangler < GLMWrangler
     end
 
     PHASES.each do |ph|
-      recs << GLMObject.new(self, {
+      recs << new_obj({
         class: 'group_recorder',
         group: "\"groupid=#{VOLTAGE_GROUPID}\"",
         property: "voltage_#{ph}",

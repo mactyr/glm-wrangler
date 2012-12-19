@@ -131,7 +131,7 @@ class GLMWrangler
     
     while l = infile.gets do    
       if l =~ OBJ_REGEX   
-        obj = GLMObject.new self, dec_line: l, infile: infile
+        obj = new_obj dec_line: l, infile: infile
         @lines << obj
       else
         # For now anything that isn't inside an object declaration just gets
@@ -229,6 +229,13 @@ class GLMWrangler
       end
     end
     @lines = dupe
+  end
+
+  private
+
+  # Convenience method to create a new GLMObject associated with this GLMWrangler
+  def new_obj(props)
+    GLMObject.new self, props
   end
 
 end
