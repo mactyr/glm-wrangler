@@ -231,6 +231,14 @@ class GLMWrangler
     @lines = dupe
   end
 
+  # Get a concise string representation of the tree.
+  # See GLMObject#tree for some important caveats!
+  # If you wanted to send this to a file you could start an interactive session
+  # and use the command: "File.write('outfile.txt', tree)"
+  def tree(prop = nil)
+    find_by_bustype('SWING', 1).tree prop
+  end
+
   private
 
   # Convenience method to create a new GLMObject associated with this GLMWrangler
@@ -411,6 +419,23 @@ class GLMWrangler::GLMObject < Hash
     result
   end
   
+  # Find a reasonably unique and concise label for this object
+  def label
+    self[:name] || self[:id] || @class + (self[:num] ? ":#{self[:num]}" : '')
+  end
+
+  # Assemble a compact string representation of this node and its
+  # descendants.  Optionally list the value of a property alongside
+  # each object's label.
+  # Warning: Can take on the order of minutes with a large number of objects.
+  # Also, does not check for cycles and will loop infinitely if it encounters one.
+  def tree(prop = nil, depth = 0)
+    prop = prop.to_sym if prop.respond_to? :to_sym
+    prop_s = self[prop] ? " (#{self[prop]})" : ''
+    out = "#{tab(depth)}#{label}#{prop_s}\n"
+    out + downstream.map {|d| d.tree prop, depth + 1}.join
+  end
+
   private
   
   def push_nested(obj)
