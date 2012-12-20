@@ -14,6 +14,12 @@ class Array
   end
 end
 
+class Numeric
+  def near?(other, tolerance = 1)
+    (self - other.to_f).abs <= tolerance
+  end
+end
+
 class MyGLMWrangler < GLMWrangler
 
   DATA_DIR = 'data'
@@ -35,6 +41,8 @@ class MyGLMWrangler < GLMWrangler
 
     # Pare down the list of all configs found to just the "standard" ones we can use
     all_configs.select! {|tc| tc.real? && tc.standard_size?}
+    all_configs.each {|tc| tc.standardize_rating!}
+
     # If we're scrounging original taxonomy feeders (as opposed to Feeder_Generator.m
     # "loaded" feeders) then they'll have id numbers rather than names, which we'll
     # need to fix.
@@ -45,7 +53,7 @@ class MyGLMWrangler < GLMWrangler
       end
     end
 
-    # Turns out that the taxonomy feeders reuse names between them, so we need to
+    # Turns out that the taxonomy feeders reuse id numbers between them, so we need to
     # create out own set of unique id numbers for the menu.  We do this by prefixing
     # each config's index in the array with the letter "i" for "import"
     # We overwrite the old id number since it's not unique anyway
@@ -634,6 +642,7 @@ module GLMWrangler::GLMObject::TransformerConfiguration
   #   xfmrs in the GridLAB-D taxonomy feeders
   # - We add 750 and 1000 on the high end since we occasionally need an xfmr that big
   STD_KVA_1PH = [5, 10, 15, 25, 37.5, 50, 75, 100, 175, 250, 337.5, 500, 750, 1000]
+  STD_KVA_EDITS = {175 => 167, 337.5 => 333}
 
   # Get the overall 3ph rating for the configuration
   def rating
@@ -681,11 +690,23 @@ module GLMWrangler::GLMObject::TransformerConfiguration
   def standard_size?
     r = per_phase_rating
     # Being loose with the matching here to account for any floating-point oddness
-    STD_KVA_1PH.find {|std| (std - r).abs <= 1}
+    STD_KVA_1PH.find {|std| std.near? r}
   end
 
   def impedance
     Math.sqrt(self[:resistance].to_f**2 + self[:reactance].to_f**2)
+  end
+
+  # Reclassify a 175kVA xfmr as 167kVA and 337.5kVA to 333kVA
+  def standardize_rating!
+    r = per_phase_rating
+    STD_KVA_EDITS.each do |nonstandard, standard|
+      if r.near? nonstandard
+        phases.chars {|ph| self["power#{ph}_rating".to_sym] = '%.1f' % standard}
+        self[:power_rating] = '%.1f' % (standard * phase_count) if self[:power_rating]
+        break
+      end
+    end
   end
 end
 
