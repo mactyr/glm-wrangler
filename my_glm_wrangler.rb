@@ -252,17 +252,6 @@ class MyGLMWrangler < GLMWrangler
 
     climate_name = find_by_class('climate', 1)[:name]
     xfmrs.each do |xfmr|
-      # Use the thermal aging model for all SINGLE_PHASE_CENTER_TAPPED xfmrs we encounter
-      # (the GridLAB-D thermal model only works with this type of xfmr for now)
-      # if xfmr.configuration[:connect_type] == 'SINGLE_PHASE_CENTER_TAPPED'
-      #   xfmr[:groupid] = AGING_GROUPID
-      #   xfmr[:use_thermal_model] = 'TRUE'
-      #   xfmr[:climate] = climate_name
-      #   xfmr[:aging_granularity] = 300
-      #   xfmr[:percent_loss_of_life] = 0
-      #   xfmr[:coolant_type] = 'MINERAL_OIL'
-      # end
-
       # Find reasonable candidate configurations for this xfmr given its baseline max_load
       max_load = max_loads[xfmr[:name]].to_f
       old_config = find_by_name(xfmr[:configuration]).first
@@ -320,7 +309,8 @@ class MyGLMWrangler < GLMWrangler
         end
       end
 
-      used_rating = (new_config || old_config).rating
+      used_config = new_config || old_config
+      used_rating = used_config.rating
       undersized_by = max_load - used_rating
       if undersized_by > 0
         xfmr[:comment0] += " (Undersized by #{'%.1f' % undersized_by}kVA!)"
@@ -330,6 +320,38 @@ class MyGLMWrangler < GLMWrangler
       elsif used_rating > 5 && (oversized_by = -undersized_by) >= max_load
         xfmr[:comment0] += " (Oversized by #{'%.1f' % oversized_by}kVA!)"
         wrongsized[:over][xfmr[:name]] = oversized_by
+      end
+
+      # Use the thermal aging model for all SINGLE_PHASE_CENTER_TAPPED xfmrs we encounter
+      # (the GridLAB-D thermal model only works with this type of xfmr for now)
+      if used_config[:connect_type] == 'SINGLE_PHASE_CENTER_TAPPED'
+        xfmr.merge!({
+          groupid: AGING_GROUPID,
+          use_thermal_model: 'TRUE',
+          climate: climate_name,
+          aging_granularity: 300,
+          aging_constant: 15000,
+          percent_loss_of_life: 0
+        })
+
+        # Set the config up with the necessary aging parameters,
+        # unless it was already set up
+        unless used_config[:coolant_type]
+          used_config.merge!({
+            full_load_loss: '0.006',
+            no_load_loss: '0.003',
+            reactance_resistance_ratio: 10,
+            core_coil_weight: 50,
+            tank_fittings_weight: 150,
+            oil_volume: 4,
+            rated_winding_hot_spot_rise: 80,
+            rated_top_oil_rise: 30,
+            rated_winding_time_constant: 24,
+            installed_insulation_life: 17520,
+            coolant_type: 'MINERAL_OIL',
+            cooling_type: 'OA'
+          })
+        end
       end
     end
 
@@ -527,7 +549,7 @@ class MyGLMWrangler < GLMWrangler
     loss_types.each do |ltype, abbrev|
       recs << new_obj({
         class: 'collector',
-        group: "\"class~#{ltype}\"",
+        group: "\"class=#{ltype}\"",
         property: 'sum(power_losses.real)',
         interval: interval,
         limit: limit,
@@ -538,20 +560,20 @@ class MyGLMWrangler < GLMWrangler
     # Aging_Transformer loss of life and replacements
     # All we really care about is these values at the end of the run,
     # so we'll only collect them once a day to save space
-    # xfmr_props = {
-    #   'percent_loss_of_life' => 'pct_lol',
-    #   'transformer_replacement_count' => 'replacements'
-    # }
-    # xfmr_props.each do |prop, abbrev|
-    #   recs << new_obj({
-    #     class: 'group_recorder',
-    #     group: "\"groupid=#{AGING_GROUPID}\"",
-    #     property: prop,
-    #     interval: DAY_INTERVAL,
-    #     limit: limit,
-    #     file: file_base + 'xfmr_' + abbrev + '.csv'
-    #   })
-    # end
+    xfmr_props = {
+      'percent_loss_of_life' => 'pct_lol',
+      'transformer_replacement_count' => 'replacements'
+    }
+    xfmr_props.each do |prop, abbrev|
+      recs << new_obj({
+        class: 'group_recorder',
+        group: "\"groupid=#{AGING_GROUPID}\"",
+        property: prop,
+        interval: DAY_INTERVAL,
+        limit: limit,
+        file: file_base + 'xfmr_' + abbrev + '.csv'
+      })
+    end
 
     # Tap-change recorders.  Here again, we only care about the final total,
     # so we'll just record once per day
