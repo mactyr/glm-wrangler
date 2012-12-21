@@ -225,7 +225,7 @@ class MyGLMWrangler < GLMWrangler
   def setup_sc(region, penetration)
     common_setup region
     setup_recorders :sc, region
-    rerate_dist_xfmrs region, 'setup_sc_xfmr_rerate_log.txt'
+    rerate_dist_xfmrs region, 'setup_sc_xfmr_rerate_log.csv'
     add_sc_solar region, penetration
     remove_extra_blanks_from_top_layer
   end
