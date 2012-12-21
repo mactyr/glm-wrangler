@@ -606,7 +606,7 @@ class MyGLMWrangler < GLMWrangler
         property: 'tap_A_change_count,tap_B_change_count,tap_C_change_count',
         interval: DAY_INTERVAL,
         limit: limit,
-        file: file_base + reg[:name][-4..-1] + '.csv'
+        file: file_base + reg[:name][-5..-1] + '.csv'
       })
     end
 
@@ -623,6 +623,7 @@ class MyGLMWrangler < GLMWrangler
         class: 'group_recorder',
         group: "\"groupid=#{VOLTAGE_GROUPID}\"",
         property: "voltage_#{ph}",
+        complex_part: 'MAG',
         interval: interval,
         limit: limit,
         file: file_base + 'v_profile_' + ph + '.csv'
