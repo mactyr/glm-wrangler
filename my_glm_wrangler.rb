@@ -238,6 +238,24 @@ class MyGLMWrangler < GLMWrangler
       max_loads[r['name']] = r['max']
     end
 
+    # Get the thermal config parameters
+    thermal_load_file = data_file 'xfmr_thermal_config.csv'
+    thermal_configs = Hash.new(Hash.new)
+    CSV.foreach(thermal_load_file, headers: true, header_converters: :symbol) do |r|
+      v = r.delete(:primary_voltage).last.to_i
+      p = r.delete(:power_rating).last.to_i
+      thermal_configs[v][p] = r
+    end
+
+    # The transformers using the thermal aging model specify their impedance
+    # in a different way (with :no_load_loss, :full_load_loss, etc.)
+    # except... that doesn't seem to work so we'll be providing our own values
+    # for some of these anyway.  I'm still going to explicitly delete them
+    # before setting our own values to be on the safe side.
+    thermal_props_to_reject = [:resistance, :reactance, :shunt_impedance]
+    # Also specify some properties we always need to add for the thermal model
+    thermal_props_to_add = {coolant_type: 'MINERAL_OIL', cooling_type: 'OA'}
+
     # Find all transformer_configurations used by "Distribution Transformers"
     # and sort them by rating.  Ignore the "load"/"CTTF" transformers added by Feeder_Generator
     # for commercial loads, since they are set up in a load-specific way
@@ -253,7 +271,7 @@ class MyGLMWrangler < GLMWrangler
     # Keep track of some things for logging purposes
     counts = Hash.new 0
     counts[:total] = xfmrs.length
-    [:changed, :unchanged, :failed, :imported].each do |k|
+    [:changed, :unchanged, :failed, :imported, :thermal].each do |k|
       counts[k] = 0
     end
     wrongsized = {under: Hash.new(0), over: Hash.new(0)}
@@ -333,6 +351,8 @@ class MyGLMWrangler < GLMWrangler
       # Use the thermal aging model for all SINGLE_PHASE_CENTER_TAPPED xfmrs we encounter
       # (the GridLAB-D thermal model only works with this type of xfmr for now)
       if used_config[:connect_type] == 'SINGLE_PHASE_CENTER_TAPPED'
+        counts[:thermal] += 1
+
         xfmr.merge!({
           groupid: AGING_GROUPID,
           use_thermal_model: 'TRUE',
@@ -345,20 +365,14 @@ class MyGLMWrangler < GLMWrangler
         # Set the config up with the necessary aging parameters,
         # unless it was already set up
         unless used_config[:coolant_type]
-          used_config.merge!({
-            full_load_loss: '0.006',
-            no_load_loss: '0.003',
-            reactance_resistance_ratio: 10,
-            core_coil_weight: 50,
-            tank_fittings_weight: 150,
-            oil_volume: 4,
-            rated_winding_hot_spot_rise: 80,
-            rated_top_oil_rise: 30,
-            rated_winding_time_constant: 24,
-            installed_insulation_life: 17520,
-            coolant_type: 'MINERAL_OIL',
-            cooling_type: 'OA'
-          })
+          thermal_props_to_reject.each {|prop| used_config.delete prop}
+
+          v = used_config[:primary_voltage].to_i.round(-2)
+          p = used_config.rating.to_i
+          used_config.merge!(thermal_configs[v][p])
+          raise "Couldn't find thermal config for #{used_config[:name]}" unless used_config[:oil_volume]
+
+          used_config.merge! thermal_props_to_add
         end
       end
     end
