@@ -467,21 +467,24 @@ class MyGLMWrangler < GLMWrangler
       comment = "// Solar City PV generation rated at "
       base_power = "sc_gen_#{profile}.value"
 
-      # Scale up profile if we're installing on a commercial building
-      # TODO: Do we need to scale down if we have a "big" profile on a residential home?
-      scale = nil
-      if target[:groupid] == 'Commercial'
-        # This is borrowed from PNNL's Feeder_Generator.m
-        # The idea is that a reasonable guess for a rating for a commercial system
-        # is its area times 0.2 efficiency times 92.902W/sf peak insolation
-        potential_cap = target[:floor_area].to_i * 0.2 * 92.902 / 1000
-        scale = (potential_cap / profile_cap).round(2)
-        comment += "#{'%.1f' % potential_cap}kW (scaled up from #{'%.1f' % profile_cap}kW)"
+      # Scale profile if it's not an appropriate size for the target "house".
+      # This formula borrowed from PNNL's Feeder_Generator.m
+      # The idea is that a reasonable guess for a rating for a system
+      # is its area times 0.2 efficiency times 92.902W/sf peak insolation
+      # TODO: This may be too generous for residential; need to check
+      potential_cap = target[:floor_area].to_i * 0.2 * 92.902 / 1000
+      scale = (potential_cap / profile_cap).round(2)
+      scale_down = scale < 1
+      comm_res = target[:groupid] == 'Commercial' ? :comm : :res
+      # We always scale for commercial, but only scale down for residential
+      # (undersized systems on residential are common in real life)
+      if comm_res == :comm || scale_down
+        comment += "#{'%.1f' % potential_cap}kW (scaled #{scale_down ? 'down' : 'up'} from #{'%.1f' % profile_cap}kW)"
         base_power += "*#{scale}"
-        placed[:comm] += potential_cap
+        placed[comm_res] += potential_cap
       else
         comment += "#{'%.1f' % profile_cap}kW"
-        placed[:res] += profile_cap
+        placed[comm_res] += profile_cap
       end
 
       target.add_nested({
@@ -516,7 +519,7 @@ class MyGLMWrangler < GLMWrangler
     @lines << ''
     @lines << "// #{self.class}::#{__method__} added #{'%.1f' % placed[:res]}kW of residential solar"
     @lines << "// and #{'%.1f' % placed[:comm]}kW of commercial solar for a total of #{'%.1f' % (placed[:res] + placed[:comm])}kW"
-    @lines << "// to reach a target penetration of #{'%.1f' % (penetration * 100)}% against a peak load of #{'%.1f' % peak_load}kW"
+    @lines << "// to reach a target penetration of #{'%.1f' % (penetration * 100)}% against a peak load of #{peak_load}kW"
   end
 
   private
@@ -638,7 +641,7 @@ end
 # whether it is "real" (that is whether it was part of the original taxonomy
 # topology, as opposed to created by Feeder_Generator.m to serve part of
 # a commercial load).
-module GLMWrangler::TransformerRealTest
+module GLMWrangler::RealTest
   def real?
     self[:name] !~ /load/
   end
@@ -648,7 +651,7 @@ end
 # added to any GLMObject with a matching @class (in this case, 'transformer_configuration').
 # See GLMObject#initialize for details on how it's done.
 module GLMWrangler::GLMObject::TransformerConfiguration
-  include GLMWrangler::TransformerRealTest
+  include GLMWrangler::RealTest
 
   PHASES = GLMWrangler::PHASES
   # This is like the standard xfmr sizes from IEEE Std C57.12.20-2011 except that:
@@ -726,7 +729,7 @@ module GLMWrangler::GLMObject::TransformerConfiguration
 end
 
 module GLMWrangler::GLMObject::Transformer
-  include GLMWrangler::TransformerRealTest
+  include GLMWrangler::RealTest
 
   def substation?
     self[:name] == 'substation_transformer'
@@ -738,12 +741,12 @@ module GLMWrangler::GLMObject::Transformer
 end
 
 module GLMWrangler::GLMObject::Meter
-  # As far as I've seen, Feeder_Generator.m doesn't add fake meters,
-  # just fake triplex_meters
-  def real?; true; end
+  include GLMWrangler::RealTest
 end
 
 module GLMWrangler::GLMObject::TriplexMeter
+  # Can't use the generic #real? here because the fake
+  # triplex_meters don't always have "load" in the name
   def real?
     name = self[:name]
     name[0, 3] != 'tpm' && name !~ /load/
