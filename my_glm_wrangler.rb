@@ -505,7 +505,7 @@ class MyGLMWrangler < GLMWrangler
         player_props = {
           :class => 'player',
           :name => "sc_gen_#{profile}",
-          :file => "sc_gen_#{profile}.player"
+          :file => File.join(SHARED_DIR, 'sc_gen', "sc_gen_#{profile}.csv")
         }
         players[profile] = new_obj player_props
       end
