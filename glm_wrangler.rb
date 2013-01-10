@@ -3,37 +3,6 @@
 # This software is (c) 2012 Michael A. Cohen
 # It is released under the simplified BSD license, which can be found at:
 # http://www.opensource.org/licenses/BSD-2-Clause
-#
-# TODO: This is out of date
-# 
-# This script basically gives you an object representation of a .glm to work with.
-# It then outputs the object representation as a new .glm
-#
-# Usage:
-#
-# ruby glm_wrangler.rb in_file.glm out_file.glm [commands]
-#
-# where [commands] is a list of the methods of GLMWrangler that you'd like to run.
-# You'll want to put commands that need spaces or parens in quotes.  For example:
-#
-# ruby glm_wrangler.rb in_file.glm out_file.glm "add_sc_solar(1000, 0.1)"
-#
-# If you don't specify any commands you'll get an interactive session using pry,
-# in the scope of the GLMWrangler instance.  Obviously this requires pry to be
-# installed ("sudo gem install pry").  You can also call for an interactive
-# session explicitly by using the command "interactive" (with or without quotes).
-#
-# You can add your own instance methods to GLMWrangler and they will automatically
-# be available as commands from the command line.
-
-# Quirks to be aware of:
-# - If an object has a property set more than once (e.g. it has more than one
-#   name) only the last setting is preserved
-# - If there is something after the ';' (e.g. a comment) in an attribute-setting
-#   line, the stuff after the ';' will be preserved, but it won't be easy to edit
-# - This script does not make an attempt to preserve the nature of the whitespace
-#   in the .glm file, although it does indent sanely.  Thus, to compare to your
-#   original you should use 'diff -b' which ignores whitespace changes.
 
 begin
   require 'pry'
