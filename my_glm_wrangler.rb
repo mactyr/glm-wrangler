@@ -572,14 +572,19 @@ class MyGLMWrangler < GLMWrangler
       'transformer' => 'TFR'
     }
     loss_types.each do |ltype, abbrev|
-      recs << new_obj({
-        class: 'collector',
-        group: "\"class=#{ltype}\"",
-        property: 'sum(power_losses.real)',
-        interval: interval,
-        limit: limit,
-        file: file_base + abbrev + '_losses.csv'
-      })
+      # Only set up recorders for classes that actually exist in the feeder
+      # (Specifically, R3_1247_2 doesn't have any triplex_lines,
+      # and trying to record on class=triplex_line crashes GridLAB-D)
+      if @lines.detect {|line| line.is_a?(GLMObject) && line[:class] == ltype}
+        recs << new_obj({
+          class: 'collector',
+          group: "\"class=#{ltype}\"",
+          property: 'sum(power_losses.real)',
+          interval: interval,
+          limit: limit,
+          file: file_base + abbrev + '_losses.csv'
+        })
+      end
     end
 
     # Aging_Transformer loss of life and replacements
