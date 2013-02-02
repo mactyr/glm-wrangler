@@ -522,6 +522,31 @@ class MyGLMWrangler < GLMWrangler
     @lines << "// to reach a target penetration of #{'%.1f' % (penetration * 100)}% against a peak load of #{peak_load}kW"
   end
 
+  # Change the power factor of all ZIPloads and house HVAC loads
+  def change_load_pf(new_pf, new_hvac_pf = new_pf)
+    find_by_class('house').each do |h|
+      h[:hvac_power_factor] = h[:fan_power_factor] = new_hvac_pf
+      h.downstream.each do |d|
+        if d[:class] == 'ZIPload' && d[:groupid] != 'SC_zipload_solar'
+          d[:power_pf] = d[:current_pf] = d[:impedance_pf] = new_pf
+        end
+      end
+    end
+  end
+
+  # Assuming that you had recorders set up according to the standard
+  # MyGLMWrangler convention (that is, writing to a folder named after
+  # the file) this will update the recorder destination directory and
+  # filenames to the new name of the file
+  def redirect_recorders(in_base = nil, out_base = nil)
+    in_base ||= File.basename @infilename, EXT
+    out_base ||= File.basename @outfilename, EXT
+    find_by_class(['recorder', 'collector', 'multi_recorder', 'group_recorder', 'fault_check']).each do |r|
+      prop = r[:class] == 'fault_check' ? :output_filename : :file
+      r[prop].gsub! in_base, out_base
+    end
+  end
+
   private
   # These are private because they're helper methods that return GLMObjects
   # or Arrays of objects, and wouldn't make sense to call from the cli

@@ -166,11 +166,14 @@ class GLMWrangler
       # the result set, and any other number of results will raise an exception.
       # If the expectation is for one object, the object will be returned directly
       # (that is, not in an array)
+      # If the value to be matched is an Enumerable (e.g. if it's an Array)
+      # then return all objects that match any element of the value.
       num_args = args.length
       raise ArgumentError, "find_by methods expect one or two arguments" unless num_args == 1 || num_args == 2
       prop = $1.to_sym
       val, expecting = args
-      found = @lines.select {|l| l.is_a?(GLMObject) && l[prop] == val}
+      test = val.is_a?(Enumerable) ? :include? : :==
+      found = @lines.select {|l| l.is_a?(GLMObject) && val.send(test, l[prop])}
       if expecting
         if found.length == expecting
           return found.first if expecting == 1
