@@ -11,9 +11,10 @@ rescue LoadError
 end
 require 'csv'
 
-version_pieces = RUBY_VERSION.split '.'
-unless version_pieces[0] == '1' && version_pieces[1] == '9'
-  raise "This script was written for use with ruby 1.9 and will not run correctly on older versions; sorry."
+# GLMWrangler requires ruby 1.9 or greater mainly because it relies on
+# hashes being ordered to avoid rearranging your .glms
+unless RUBY_VERSION >= '1.9'
+  raise "This script was written for use with ruby 1.9 or above and will not run correctly on older versions; sorry."
 end
 
 class Object

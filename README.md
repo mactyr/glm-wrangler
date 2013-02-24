@@ -10,7 +10,7 @@ GLMWrangler is &copy; 2012 by Michael A. Cohen. It is released under the [simpli
 
 ## Requirements
 
-GLMWrangler was written for ruby 1.9 and will not run under ruby 1.8. I encourage you to install the [pry gem](https://rubygems.org/gems/pry) to make learning and using GLMWrangler easier, but it is not strictly required.
+GLMWrangler was written for ruby 1.9 and will not run under ruby 1.8. It should work fine under 2.0 though I have not tested this yet. I encourage you to install the [pry gem](https://rubygems.org/gems/pry) to make learning and using GLMWrangler easier, but it is not strictly required.
 
 ## Basic Usage
 
