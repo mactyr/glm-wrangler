@@ -74,6 +74,19 @@ class MyGLMWrangler < GLMWrangler
     out_wrangler.write
   end
 
+  # Outputs a .csv with the name, phase(s) and distance from substation
+  # of each GLMObject with a :class of klass
+  def self.phase_and_distance_list(infilename, outfilename, klass)
+    wrangler = new infilename: infilename
+    CSV.open(outfilename, 'w') do |csv|
+      csv << %w[name phase distance_ft distance_mi]
+      wrangler.find_by_class(klass).each do |obj|
+        d = obj.distance
+        csv << [obj.label, obj.simple_phases, d, d/5280]
+      end
+    end
+  end
+
   def data_file(*path_parts)
     File.join DATA_DIR, *path_parts
   end

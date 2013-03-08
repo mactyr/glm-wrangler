@@ -409,6 +409,26 @@ class GLMWrangler::GLMObject < Hash
     out + downstream.map {|d| d.tree prop, depth + 1}.join
   end
 
+  # Return the distance of this object from the substation
+  # Note that if self is a link object, its length *is* included
+  # (so this is the distance to the far end of self)
+  def distance
+    obj = self
+    d = 0
+    begin
+      d += obj[:length].to_f if obj[:length]
+      obj = obj.upstream
+    end until obj[:bustype] == 'SWING'
+    d
+  end
+
+  # Return just the ABC part of the phase information,
+  # discarding things like N and S
+  # Returns nil if self has no :phases
+  def simple_phases
+    self[:phases].gsub(/[^ABC]/, '') if self[:phases]
+  end
+
   private
   
   def push_nested(obj)
