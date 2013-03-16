@@ -547,6 +547,35 @@ class MyGLMWrangler < GLMWrangler
     end
   end
 
+  # Implement our custom load power factors for certain load types
+  def custom_load_pf
+    # adjusted power factors from "power factor data.xlsx"
+    new_pf = {
+      'pool_pump' => '0.87',
+      'responsive_loads' => '0.95',
+      'unresponsive_loads' => '0.95',
+      'lights' => '0.90', # this is interior lighting
+      'plugs' => '0.95',
+      'exterior' => '0.95'
+    }
+    find_by_class('house').each do |h|
+      # note that for the sake of performance we're assuming
+      # all the ZIPloads are nested under the house
+      # If they were downstream in some other way we'd need
+      # to use h.downstream, which is slower
+      h.nested.each do |d|
+        if d[:class] == 'ZIPload'
+          new_pf.each do |load_type, pf|
+            if d[:base_power].include? load_type
+              d[:power_pf] = d[:current_pf] = d[:impedance_pf] = pf
+              break
+            end
+          end
+        end
+      end
+    end
+  end
+
   # Assuming that you had recorders set up according to the standard
   # MyGLMWrangler convention (that is, writing to a folder named after
   # the file) this will update the recorder destination directory and
