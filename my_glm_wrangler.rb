@@ -576,6 +576,15 @@ class MyGLMWrangler < GLMWrangler
     end
   end
 
+  def adjust_regulator_setpoints(setpoint_pu)
+    v_ll = @infilename.include?('2500') ? 24_900 : 12_470
+    # .glm regulator setpoints are based on line-to-neutral voltage
+    setpoint = '%.2f' % (v_ll / Math.sqrt(3) * setpoint_pu)
+    find_by_class('regulator_configuration').each do |cfg|
+      cfg[:band_center] = setpoint
+    end
+  end
+
   # Assuming that you had recorders set up according to the standard
   # MyGLMWrangler convention (that is, writing to a folder named after
   # the file) this will update the recorder destination directory and
