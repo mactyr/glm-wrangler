@@ -25,7 +25,6 @@ class MyGLMWrangler < GLMWrangler
   DATA_DIR = 'data'
   SHARED_DIR = File.join('..', 'shared')
   AGING_GROUPID = 'Aging_Trans'
-  VOLTAGE_GROUPID = 'Volt_Node'
   DAY_INTERVAL = 60 * 60 * 24
 
   # generate a "menu" of unique transformer_configurations in standard sizes
@@ -240,6 +239,8 @@ class MyGLMWrangler < GLMWrangler
     setup_recorders :sc, region
     rerate_dist_xfmrs region, 'setup_sc_xfmr_rerate_log.csv'
     add_sc_solar region, penetration
+    custom_load_pf
+    adjust_regulator_setpoints 1.03
     remove_extra_blanks_from_top_layer
   end
 
@@ -655,7 +656,7 @@ class MyGLMWrangler < GLMWrangler
         recs << new_obj({
           class: 'collector',
           group: "\"class=#{ltype}\"",
-          property: 'sum(power_losses.real)',
+          property: 'sum(power_losses.real),sum(power_losses.imag)',
           interval: interval,
           limit: limit,
           file: file_base + abbrev + '_losses.csv'
@@ -681,38 +682,41 @@ class MyGLMWrangler < GLMWrangler
       })
     end
 
-    # Tap-change recorders.  Here again, we only care about the final total,
-    # so we'll just record once per day
+    # Also collect power profiles for Aging_Transformers so we
+    # can have some sense of why we're seeing what we're seeing
+    recs << new_obj({
+      class: 'group_recorder',
+      group: "\"groupid=#{AGING_GROUPID}\"",
+      property: 'power_in',
+      complex_part: 'MAG',
+      interval: interval,
+      limit: limit,
+      file: file_base + 'xfmr_va.csv'
+    })
+
+    # Tap-change recorders
     find_by_class('regulator').each do |reg|
       recs << new_obj({
         class: 'recorder',
         parent: reg[:name],
-        property: 'tap_A_change_count,tap_B_change_count,tap_C_change_count',
-        interval: DAY_INTERVAL,
+        property: 'tap_A_change_count,tap_B_change_count,tap_C_change_count,tap_A,tap_B,tap_C,power_in_A.mag,power_in_B.mag,power_in_C.mag,power_out_A.mag,power_out_B.mag,power_out_C.mag,current_in_A.mag,current_in_B.mag,current_in_C.mag,current_out_A.mag,current_out_B.mag,current_out_C.mag',
+        interval: interval,
         limit: limit,
         file: file_base + reg[:name][-5..-1] + '.csv'
       })
     end
 
-    # Setup groupid for nodes where we want to record voltages
-    # (which is any node that is a parent of a "real" transformer)
-    xfmrs = find_by_class('transformer').select {|t| t.real? && !t.substation?}
-    xfmrs.map {|t| t.upstream}.uniq.each do |node|
-      raise "Node #{node[:name]} already has groupid #{node[:groudid]}" if node[:groupid]
-      node[:groupid] = VOLTAGE_GROUPID
-    end
-
-    PHASES.each do |ph|
-      recs << new_obj({
-        class: 'group_recorder',
-        group: "\"groupid=#{VOLTAGE_GROUPID}\"",
-        property: "voltage_#{ph}",
-        complex_part: 'MAG',
-        interval: interval,
-        limit: limit,
-        file: file_base + 'v_profile_' + ph + '.csv'
-      })
-    end
+    # Record voltage at the point of use, which conveniently is always
+    # a triplex_meter
+    recs << new_obj({
+      class: 'group_recorder',
+      group: 'class=triplex_meter',
+      property: "voltage_12",
+      complex_part: 'MAG',
+      interval: interval,
+      limit: limit,
+      file: file_base + 'v_profile_12.csv'
+    })
 
     recs << fault_check(file_base)
   end
