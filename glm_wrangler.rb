@@ -129,7 +129,7 @@ class GLMWrangler
   
   # put a line after all other comments at the top of the .glm that notes
   # how the .glm was wrangled
-  def sign(commands = @commands)
+  def sign(commands = @commands, notes)
     first_content_i = @lines.index {|l| !l.blank? && !l.comment?}
     raise "Couldn't find any non-blank, non-comment lines in the .glm" if first_content_i.nil?
 
@@ -141,6 +141,7 @@ class GLMWrangler
     sig << "// from #{infilename} to #{@outfilename}"
     sig << "// by #{ENV['USERNAME'] || ENV['USER']} at #{Time.now.getlocal}"
     sig << "// Wrangler commands: #{commands.blank? ? '[no commands - defaulted to interactive session]' : commands}"
+    sig << notes if notes
     sig << ''
 
     @lines.insert first_content_i, *sig
@@ -151,10 +152,10 @@ class GLMWrangler
   end
 
   # Write out the .glm file based on @lines
-  def write(outfilename = @outfilename)
-    if outfilename
-      puts "Writing #{outfilename}"
-      File.write outfilename, to_s
+  def write
+    if @outfilename
+      puts "Writing #{@outfilename}"
+      File.write @outfilename, to_s
     else
       warn "No destination file given, exiting without writing."
     end

@@ -600,6 +600,27 @@ class MyGLMWrangler < GLMWrangler
     end
   end
 
+  def slice_clock(slices = 2)
+    @clock_slices = slices
+  end
+
+  def clock_sliced?
+    (@clock_slices || 1) > 1
+  end
+
+  def sign
+    if clock_sliced?
+      note = "// Split into #{@clock_slices} time slices with filename endings like '_s?.glm'."
+    end
+    super @commands, note
+  end
+
+  def write
+    clock_sliced? ? write_slices : super
+  end
+
+  private
+
   # Makes identical copies of the .glm except that the clock time is
   # divided into several identical time slices -- for doing pieces of
   # the year in parallel.
@@ -608,15 +629,9 @@ class MyGLMWrangler < GLMWrangler
   # Note also that slices after the first begin a day "early" to give
   # the model time to reach a reasonable steady state (e.g. voltage
   # regulators in the right place) before we start looking at results.
-  def split_clock(slices = 2, overlap_days = 1, suppress_default_write = true)
-    # This will result in a double-signing of the default write-out
-    # if you're not suppressing it, but I'm assuming here that if you're
-    # bothering to split the clock you don't care much about the default copy.
-    # Also note that the outfilename won't have the right _s# suffix here.
-    # In summary, the #sign/#write architecture wasn't designed to
-    # support multiple output files and it would need to be rethought to
-    # make this not ugly.
-    sign
+  def write_slices(slices = @clock_slices, overlap_days = 1)
+    raise "I don't understand how to add a slice identifier to #{@outfilename} since it doesn't end in '.glm'" if @outfilename !~ /\.glm$/
+    puts "Writing #{slices} time slices to files like #{@outfilename.sub('.glm', "_s?.glm")}"
 
     start_i = @lines.index {|l| l =~ /starttime '(.*)'/}
     start_t = DateTime.parse($1).to_time.utc
@@ -636,22 +651,18 @@ class MyGLMWrangler < GLMWrangler
 
       @lines[start_i] = "     starttime '#{slice_start.strftime('%F %T')}'"
       @lines[stop_i] = "     starttime '#{slice_stop.strftime('%F %T')}'"
-      raise "I don't understand how to add a slice identifier to #{@outfilename} since it doesn't end in '.glm'" if @outfilename !~ /\.glm$/
       outf = @outfilename.sub('.glm', "_s#{slice}.glm")
       redirect_recorders @infilename, outf
-      write outf
+      File.write outf, to_s
       # Ok, it's inefficient to flop the recorders back to their original
       # paths each time, but it's easier to understand than the alternative
       # of trying to increment the _s# counter on each recorder path in each
       # iteration.
       redirect_recorders outf, @infilename
     end
-
-    @outfilename = nil if suppress_default_write
   end
 
-  private
-  # These are private because they're helper methods that return GLMObjects
+  # The following are private because they're helper methods that return GLMObjects
   # or Arrays of objects, and wouldn't make sense to call from the cli
 
   def fault_check(file_base)
