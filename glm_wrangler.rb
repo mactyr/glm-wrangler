@@ -151,12 +151,12 @@ class GLMWrangler
   end
 
   # Write out the .glm file based on @lines
-  def write
-    if @outfilename
-      puts "Writing #{@outfilename}"
-      File.write @outfilename, to_s
+  def write(outfilename = @outfilename)
+    if outfilename
+      puts "Writing #{outfilename}"
+      File.write outfilename, to_s
     else
-      puts "No destination file given, exiting without writing."
+      warn "No destination file given, exiting without writing."
     end
   end
 

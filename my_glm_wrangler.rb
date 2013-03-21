@@ -5,6 +5,7 @@
 # http://www.opensource.org/licenses/BSD-2-Clause
 
 require_relative 'glm_wrangler'
+require 'date'
 
 class Array
   # Returns the object in the middle of the array when sorted with &block
@@ -590,13 +591,60 @@ class MyGLMWrangler < GLMWrangler
   # MyGLMWrangler convention (that is, writing to a folder named after
   # the file) this will update the recorder destination directory and
   # filenames to the new name of the file
-  def redirect_recorders(in_base = nil, out_base = nil)
-    in_base ||= File.basename @infilename, EXT
-    out_base ||= File.basename @outfilename, EXT
+  def redirect_recorders(infilename = @infilename, outfilename = @outfilename)
+    in_base ||= File.basename infilename, EXT
+    out_base ||= File.basename outfilename, EXT
     find_by_class(['recorder', 'collector', 'multi_recorder', 'group_recorder', 'fault_check']).each do |r|
       prop = r[:class] == 'fault_check' ? :output_filename : :file
       r[prop].gsub! in_base, out_base
     end
+  end
+
+  # Makes identical copies of the .glm except that the clock time is
+  # divided into several identical time slices -- for doing pieces of
+  # the year in parallel.
+  # Note that we make the assumption that start times end in 00:00:00
+  # and stop times end in 23:59:59
+  def split_clock(slices = 2, overlap_days = 1, suppress_default_write = true)
+    # This will result in a double-signing of the default write-out
+    # if you're not suppressing it, but I'm assuming here that if you're
+    # bothering to split the clock you don't care much about the default copy.
+    # Also note that the outfilename won't have the right _s# suffix here.
+    # In summary, the #sign/#write architecture wasn't designed to
+    # support multiple output files and it would need to be rethought to
+    # make this not ugly.
+    sign
+
+    start_i = @lines.index {|l| l =~ /starttime '(.*)'/}
+    start_t = DateTime.parse($1).to_time.utc
+    stop_i = @lines.index {|l| l =~ /stoptime '(.*)'/}
+    stop_t = DateTime.parse($1).to_time.utc
+
+    slice_days = ((stop_t - start_t) / DAY_INTERVAL / slices).ceil
+
+    1.upto(slices) do |slice|
+      slice_start = start_t
+      if slice > 1
+        slice_start += (slice_days * (slice - 1) - overlap_days) * DAY_INTERVAL
+      end
+      # The -1 here is -1 second, to make the end time 23:59:59
+      slice_stop = start_t + slice_days * slice * DAY_INTERVAL - 1
+      slice_stop = [slice_stop, stop_t].min
+
+      @lines[start_i] = "     starttime '#{slice_start.strftime('%F %T')}'"
+      @lines[stop_i] = "     starttime '#{slice_stop.strftime('%F %T')}'"
+      raise "I don't understand how to add a slice identifier to #{@outfilename} since it doesn't end in '.glm'" if @outfilename !~ /\.glm$/
+      outf = @outfilename.sub('.glm', "_s#{slice}.glm")
+      redirect_recorders @infilename, outf
+      write outf
+      # Ok, it's inefficient to flop the recorders back to their original
+      # paths each time, but it's easier to understand than the alternative
+      # of trying to increment the _s# counter on each recorder path in each
+      # iteration.
+      redirect_recorders outf, @infilename
+    end
+
+    @outfilename = nil if suppress_default_write
   end
 
   private
