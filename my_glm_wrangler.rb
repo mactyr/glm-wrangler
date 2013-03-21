@@ -699,7 +699,7 @@ class MyGLMWrangler < GLMWrangler
       recs << new_obj({
         class: 'recorder',
         parent: reg[:name],
-        property: 'tap_A_change_count,tap_B_change_count,tap_C_change_count,tap_A,tap_B,tap_C,power_in_A.mag,power_in_B.mag,power_in_C.mag,power_out_A.mag,power_out_B.mag,power_out_C.mag,current_in_A.mag,current_in_B.mag,current_in_C.mag,current_out_A.mag,current_out_B.mag,current_out_C.mag',
+        property: 'tap_A_change_count,tap_B_change_count,tap_C_change_count,tap_A,tap_B,tap_C,power_in_A.real,power_in_A.imag,power_in_B.real,power_in_B.imag,power_in_C.real,power_in_C.imag,power_out_A.real,power_out_A.imag,power_out_B.real,power_out_B.imag,power_out_C.real,power_out_C.imag,current_in_A.real,current_in_A.imag,current_in_B.real,current_in_B.imag,current_in_C.real,current_in_C.imag,current_out_A.real,current_out_A.imag,current_out_B.real,current_out_B.imag,current_out_C.real,current_out_C.imag',
         interval: interval,
         limit: limit,
         file: file_base + reg[:name][-5..-1] + '.csv'
