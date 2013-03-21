@@ -605,6 +605,9 @@ class MyGLMWrangler < GLMWrangler
   # the year in parallel.
   # Note that we make the assumption that start times end in 00:00:00
   # and stop times end in 23:59:59
+  # Note also that slices after the first begin a day "early" to give
+  # the model time to reach a reasonable steady state (e.g. voltage
+  # regulators in the right place) before we start looking at results.
   def split_clock(slices = 2, overlap_days = 1, suppress_default_write = true)
     # This will result in a double-signing of the default write-out
     # if you're not suppressing it, but I'm assuming here that if you're
