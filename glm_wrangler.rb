@@ -414,13 +414,8 @@ class GLMWrangler::GLMObject < Hash
   # Note that if self is a link object, its length *is* included
   # (so this is the distance to the far end of self)
   def distance
-    obj = self
-    d = 0
-    begin
-      d += obj[:length].to_f if obj[:length]
-      obj = obj.upstream
-    end until obj[:bustype] == 'SWING'
-    d
+    return 0 if self[:bustype] == 'SWING'
+    @distance ||= upstream.distance + (self[:length] || 0).to_f
   end
 
   # Return just the ABC part of the phase information,
