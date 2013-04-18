@@ -242,6 +242,7 @@ class MyGLMWrangler < GLMWrangler
     add_sc_solar region, penetration
     custom_load_pf
     adjust_regulator_setpoints 1.03
+    sc_feeder_tweaks
     remove_extra_blanks_from_top_layer
   end
 
@@ -587,16 +588,43 @@ class MyGLMWrangler < GLMWrangler
     end
   end
 
-  # Assuming that you had recorders set up according to the standard
-  # MyGLMWrangler convention (that is, writing to a folder named after
-  # the file) this will update the recorder destination directory and
-  # filenames to the new name of the file
-  def redirect_recorders(infilename = @infilename, outfilename = @outfilename)
-    in_base ||= File.basename infilename, EXT
+  def sc_feeder_tweaks
+    case @infilename
+    when /R1_1247_1/
+      slice_clock
+    when /R1_1247_2/
+      slice_clock
+    when /R1_1247_3/
+      # noop
+    when /R1_1247_4/
+      slice_clock
+    when /R1_2500_1/
+      cap = find_by_class 'capacitor', 1
+      PHASES.each {|ph| cap[:"capacitor_#{ph}"] = '0.05 MVAr'}
+      slice_clock
+    when /R3_1247_1/
+      slice_clock
+    when /R3_1247_2/
+      # noop
+    when /R3_1247_3/
+      # noop; will need to split clock but don't know how many slices yet
+    end
+  end
+
+  # Assuming that your recorder paths are of the form:
+  # [run_id]/[run_id]_rec_blah.csv
+  # This will replace [run_id] with the basename of outfilename
+  # Useful when you split out a model and want to keep the same
+  # recorders but direct their output to a new dir.
+  def redirect_recorders(outfilename = @outfilename)
     out_base ||= File.basename outfilename, EXT
     find_by_class(['recorder', 'collector', 'multi_recorder', 'group_recorder', 'fault_check']).each do |r|
       prop = r[:class] == 'fault_check' ? :output_filename : :file
-      r[prop].gsub! in_base, out_base
+      dirname, filename = File.split(r[prop])
+      if dirname.include?(File::SEPARATOR) || !filename.start_with?(dirname)
+        raise "'#{r[prop]}' isn't a recorder path I can redirect"
+      end
+      r[prop].gsub! dirname, out_base
     end
   end
 
@@ -649,16 +677,11 @@ class MyGLMWrangler < GLMWrangler
       slice_stop = start_t + slice_days * slice * DAY_INTERVAL - 1
       slice_stop = [slice_stop, stop_t].min
 
-      @lines[start_i] = "     starttime '#{slice_start.strftime('%F %T')}'"
-      @lines[stop_i] = "     starttime '#{slice_stop.strftime('%F %T')}'"
+      @lines[start_i] = "     starttime '#{slice_start.strftime('%F %T')}';"
+      @lines[stop_i] = "     stoptime '#{slice_stop.strftime('%F %T')}';"
       outf = @outfilename.sub('.glm', "_s#{slice}.glm")
-      redirect_recorders @infilename, outf
+      redirect_recorders outf
       File.write outf, to_s
-      # Ok, it's inefficient to flop the recorders back to their original
-      # paths each time, but it's easier to understand than the alternative
-      # of trying to increment the _s# counter on each recorder path in each
-      # iteration.
-      redirect_recorders outf, @infilename
     end
   end
 
