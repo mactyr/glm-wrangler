@@ -21,6 +21,18 @@ class Numeric
   end
 end
 
+class Hash
+  # Convenience methods borrowed from Rails ActiveSupport
+  def reverse_merge(other_hash)
+    other_hash.merge(self)
+  end
+
+  def reverse_merge!(other_hash)
+    # right wins if there is no left
+    merge!( other_hash ){|key,left,right| left }
+  end
+end
+
 class MyGLMWrangler < GLMWrangler
 
   DATA_DIR = 'data'
@@ -83,6 +95,60 @@ class MyGLMWrangler < GLMWrangler
       wrangler.find_by_class(klass).each do |obj|
         d = obj.distance
         csv << [obj.label, obj.simple_phases, d, d/5280]
+      end
+    end
+  end
+
+  # Setup batches of models with Solar City solar generation for run
+  # on the cluster.
+  # :indir is the directory with base models created by Feeder_Generator.m
+  # (with subdirs for the climate region loaded)
+  # :outdir is the destination directory (which will have one subdir created
+  # per feeder)
+  # :locations and :penetrations are pretty self-explanatory from the defaults
+  # :use_feeders is a list of feeder IDs to use (default is all R1 & R3)
+  # :skip_feeders is a list of IDs of any feeders to skip (e.g. 'R3_1247_3')
+  def self.sc_cluster_batch(options = {})
+    # options are likely to be coming from the command line, so need to be parsed
+    options = eval(options) if options.is_a? String
+    raise "#{__method__} expects options in a string representation of a Hash" unless options.is_a? Hash
+    options.reverse_merge! ({
+      indir: '../sc_models/from_feeder_generator',
+      outdir: '../sc_models',
+      locations: %w[berkeley loyola sacramento],
+      penetrations: [0, 0.15, 0.3, 0.5, 1],
+      use_feeders: %w[R1_1247_1 R1_1247_2 R1_1247_3 R1_1247_4 R1_2500_1 R1_1247_1 R3_1247_1 R3_1247_2 R3_1247_3],
+      skip_feeders: []
+    })
+
+    [:locations, :penetrations, :use_feeders, :skip_feeders].each do |opt|
+      options[opt] = options[opt].split if options[opt].is_a? String
+    end
+    locations = options[:locations].map {|r| r.downcase}
+    feeders = options[:use_feeders] - options[:skip_feeders]
+
+    # tag the filename with any special adjustments being made for this batch
+    adj_str = ''
+    adj_str += '_onemin' if options[:adjustments][:onemin]
+    # make sure the adjustments string says *something* if there were
+    # any adjustments and the adjustments string is still blank,
+    # to make sure we don't overwrite the base model names
+    adj_str = '_unknown' if options[:adjustments] && adj_str.empty?
+
+    locations.each do |loc|
+      # Berkeley uses climate region 1 loadings from Feeder_Generator.m,
+      # our other two locations use region 3
+      source_dir = File.join(options[:indir], "region_#{loc == 'berkeley' ? '1' : '3'}")
+      feeders.each do |feeder|
+        infile = Dir.glob(File.join(source_dir, "#{feeder}*#{EXT}")).first
+        options[:penetrations].each do |pen|
+          dest = File.join(options[:outdir], feeder)
+          Dir.mkdir(dest) unless File.exists?(dest)
+          dest_file = File.join(dest, "#{feeder}_sc#{'%03d' % (pen * 100)}_#{loc}#{adj_str}#{EXT}")
+          command = "setup_sc('#{loc}', #{pen}, #{options[:adjustments]})"
+          puts "Processing #{infile} -> #{dest_file} with: #{command}"
+          process(infile, dest_file, command) unless options[:test]
+        end
       end
     end
   end
@@ -235,11 +301,11 @@ class MyGLMWrangler < GLMWrangler
     remove_extra_blanks_from_top_layer
   end
 
-  def setup_sc(region, penetration)
+  def setup_sc(region, penetration, options = {})
     common_setup region
     setup_recorders :sc, region
     rerate_dist_xfmrs region, 'setup_sc_xfmr_rerate_log.csv'
-    add_sc_solar region, penetration
+    add_sc_solar region, penetration, options
     custom_load_pf
     adjust_regulator_setpoints 1.03
     sc_feeder_tweaks
@@ -429,7 +495,7 @@ class MyGLMWrangler < GLMWrangler
   # Add Solar City generation profiles to the desired load_type until the
   # specified penetration fraction is reached.  peak_load is expected in kW.
   # Also add the players necessary to support each profile that's used.
-  def add_sc_solar(region, penetration)
+  def add_sc_solar(region, penetration, options = {})
     return if penetration == 0
     base_feeder_name = File.basename(@infilename)[0, 9]
     region.downcase!
@@ -448,12 +514,22 @@ class MyGLMWrangler < GLMWrangler
       capacities[row['SGInverter'].to_i] = row['InvCapEst'].to_f
     end
 
-    # Load the geographic meter/profile matches for this feeder and region
-    # In the hash, the key is the meter node's name and the value is the
-    # profile (that is, inverter) ID
-    profiles = {}
-    CSV.foreach(data_file("sc_match/#{base_feeder_name}_#{region}.csv"), headers: true) do |r|
-      profiles[r['node']] = r['SGInverter'].to_i
+    if options[:onemin]
+      if region != "loyola"
+        raise "The one-minute profile is from loyola but you asked for region '#{region}'; you should reconsider."
+      end
+      # If we're setting up a "one-minute solar data" sensitivity, we're only
+      # using a single profile, so we set-it-and-forget-it now
+      profile = 4827
+      profile_cap = capacities[profile]
+    else
+      # Load the geographic meter/profile matches for this feeder and region
+      # In the hash, the key is the meter node's name and the value is the
+      # profile (that is, inverter) ID
+      profiles = {}
+      CSV.foreach(data_file("sc_match/#{base_feeder_name}_#{region}.csv"), headers: true) do |r|
+        profiles[r['node']] = r['SGInverter'].to_i
+      end
     end
 
     # Grab all possible target objects and shuffle them
@@ -474,11 +550,13 @@ class MyGLMWrangler < GLMWrangler
       target = targets.shift
       raise "Ran out of targets to add solar to" if target.nil?
 
-      # Find the Solar City profile corresponding to this target's meter
-      meter = target.location_meter
-      profile = profiles[meter[:name]]
-      raise "Couldn't find a profile for #{target[:name]} under #{meter[:name]}" if profile.nil?
-      profile_cap = capacities[profile]
+      unless options[:onemin]
+        # Find the Solar City profile corresponding to this target's meter
+        meter = target.location_meter
+        profile = profiles[meter[:name]]
+        raise "Couldn't find a profile for #{target[:name]} under #{meter[:name]}" if profile.nil?
+        profile_cap = capacities[profile]
+      end
 
       comment = "// Solar City PV generation rated at "
       base_power = "sc_gen_#{profile}.value"
