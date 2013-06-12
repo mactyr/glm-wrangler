@@ -129,14 +129,16 @@ class MyGLMWrangler < GLMWrangler
 
     # tag the filename with any special adjustments being made for this batch
     adj_str = ''
-    if options[:adjustments][:onemin]
-      adj_str += '_onemin'
-      adj_str += 'down' if options[:adjustments][:onemin] == :downsampled
+    if options[:adjustments]
+      if options[:adjustments][:onemin]
+        adj_str += '_onemin'
+        adj_str += 'down' if options[:adjustments][:onemin] == :downsampled
+      end
+      # make sure the adjustments string says *something* if there were
+      # any adjustments and the adjustments string is still blank,
+      # to make sure we don't overwrite the base model names
+      adj_str = '_unknown' if adj_str.empty?
     end
-    # make sure the adjustments string says *something* if there were
-    # any adjustments and the adjustments string is still blank,
-    # to make sure we don't overwrite the base model names
-    adj_str = '_unknown' if options[:adjustments] && adj_str.empty?
 
     locations.each do |loc|
       # Berkeley uses climate region 1 loadings from Feeder_Generator.m,
