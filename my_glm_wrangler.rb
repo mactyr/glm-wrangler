@@ -129,7 +129,10 @@ class MyGLMWrangler < GLMWrangler
 
     # tag the filename with any special adjustments being made for this batch
     adj_str = ''
-    adj_str += '_onemin' if options[:adjustments][:onemin]
+    if options[:adjustments][:onemin]
+      adj_str += '_onemin'
+      adj_str += 'down' if options[:adjustments][:onemin] == :downsampled
+    end
     # make sure the adjustments string says *something* if there were
     # any adjustments and the adjustments string is still blank,
     # to make sure we don't overwrite the base model names
@@ -522,6 +525,7 @@ class MyGLMWrangler < GLMWrangler
       # using a single profile, so we set-it-and-forget-it now
       profile = 4827
       profile_cap = capacities[profile]
+      profile = "#{profile}_15min" if options[:onemin] == :downsampled
     else
       # Load the geographic meter/profile matches for this feeder and region
       # In the hash, the key is the meter node's name and the value is the
@@ -685,7 +689,9 @@ class MyGLMWrangler < GLMWrangler
     when /R3_1247_2/
       # noop
     when /R3_1247_3/
-      # noop; will need to split clock but don't know how many slices yet
+      # noop - six slices wasn't enough with the current setup and it's not
+      # clear what to do about that yet
+      # slice_clock 6
     end
   end
 
