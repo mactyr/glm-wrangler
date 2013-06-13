@@ -254,6 +254,20 @@ class MyGLMWrangler < GLMWrangler
     @lines.insert(climate_i, reader, '')
   end
 
+  def use_fbs_solver
+    i = @lines.index {|l| l =~ /^(\s*solver_method )/}
+    @lines[i] = $1 + "FBS;"
+
+    old_len = @lines.length
+    @lines.delete_if do |l|
+      l.respond_to?(:match) && l =~ /^\s*(NR_iteration_limit|lu_solver)/
+    end
+    deleted = old_len - @lines.length
+    if deleted != 2
+      raise "Found wrong number of NR parameters to delete (#{deleted} rather than 2)"
+    end
+  end
+
   # set up recorders/collectors/etc for our baseline run
   def setup_recorders(style, region)
     sub_rec = find_by_class('recorder').first
@@ -303,6 +317,7 @@ class MyGLMWrangler < GLMWrangler
     use_custom_weather region
     remove_service_status_players
     use_shared_path
+    use_fbs_solver
   end
 
   def setup_baseline(region)
@@ -680,25 +695,22 @@ class MyGLMWrangler < GLMWrangler
   def sc_feeder_tweaks
     case @infilename
     when /R1_1247_1/
-      slice_clock
+      # noop
     when /R1_1247_2/
-      slice_clock
+      # noop
     when /R1_1247_3/
       # noop
     when /R1_1247_4/
-      slice_clock
+      # noop
     when /R1_2500_1/
       cap = find_by_class 'capacitor', 1
       PHASES.each {|ph| cap[:"capacitor_#{ph}"] = '0.05 MVAr'}
-      slice_clock
     when /R3_1247_1/
-      slice_clock
+      # noop
     when /R3_1247_2/
       # noop
     when /R3_1247_3/
-      # noop - six slices wasn't enough with the current setup and it's not
-      # clear what to do about that yet
-      # slice_clock 6
+      slice_clock 3
     end
   end
 
@@ -779,14 +791,6 @@ class MyGLMWrangler < GLMWrangler
   # The following are private because they're helper methods that return GLMObjects
   # or Arrays of objects, and wouldn't make sense to call from the cli
 
-  def fault_check(file_base)
-    new_obj({
-      class: 'fault_check',
-      check_mode: 'ONCHANGE',
-      output_filename: file_base + 'fault.txt'
-    })
-  end
-
   def baseline_recorders(file_base, interval, limit)
     recs = []
 
@@ -809,9 +813,6 @@ class MyGLMWrangler < GLMWrangler
       interval: interval,
       limit: limit
     })
-
-    # Fault check
-    recs << fault_check(file_base)
   end
 
   # Note that there is an assumption that this is called after the feeder is
@@ -928,7 +929,7 @@ class MyGLMWrangler < GLMWrangler
       })
     end
 
-    recs << fault_check(file_base)
+    recs
   end
 end
 
