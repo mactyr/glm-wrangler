@@ -38,7 +38,9 @@ class MyGLMWrangler < GLMWrangler
   DATA_DIR = 'data'
   SHARED_DIR = File.join('..', 'shared')
   AGING_GROUPID = 'Aging_Trans'
+  SC_GROUPID = 'SC_zipload_solar'
   DAY_INTERVAL = 60 * 60 * 24
+  MINUTE_INTERVAL = 60
 
   # generate a "menu" of unique transformer_configurations in standard sizes
   # from a folder of .glm objects.
@@ -116,7 +118,7 @@ class MyGLMWrangler < GLMWrangler
       indir: '../sc_models/from_feeder_generator',
       outdir: '../sc_models',
       locations: %w[berkeley loyola sacramento],
-      penetrations: [0, 0.15, 0.3, 0.5, 1],
+      penetrations: [0, 0.075, 0.15, 0.3, 0.5, 0.75, 1],
       use_feeders: %w[R1_1247_1 R1_1247_2 R1_1247_3 R1_1247_4 R1_2500_1 R1_1247_1 R3_1247_1 R3_1247_2 R3_1247_3],
       skip_feeders: []
     })
@@ -266,15 +268,25 @@ class MyGLMWrangler < GLMWrangler
     sub_rec[:file] = file_base + 'substation_power.csv'
 
     # default other recorders to having the same interval and limit
-    # as the substation recorder
+    # as the default substation recorder
     interval = sub_rec[:interval]
     limit = sub_rec[:limit]
 
-    # we don't care about the phase balance of power flow, so let's cut down on data storage
-    # by just capturing the total power_in to the substation
-    sub_rec[:property] = 'power_in.real,power_in.imag'
+    # We're most interested in the power_in to the substation transformer
+    # for peak load purposes
+    sub_rec[:property] = 'power_in.real,power_in.imag,power_in_A.real,power_in_A.imag,power_in_B.real,power_in_B.imag,power_in_C.real,power_in_C.imag'
+    # and we're actually interested in recording it every minute to get as close
+    # to the "true" peak load as possible
+    sub_rec[:interval] = MINUTE_INTERVAL
 
     remove_classes_from_top_layer 'recorder', 'collector', 'billdump'
+
+    # adjust EOLVolt multi-recorder file destinations
+    find_by_class('multi_recorder').each do |obj|
+      volt_match = /EOLVolt[1-9]\.csv/.match(obj[:file])
+      raise "I found a multi-recorder that doesn't appear to be an EOLVolt recorder" if volt_match.nil?
+      obj[:file] = file_base + volt_match[0]
+    end
 
     # Add custom baseline or sc (production run) recorders as dictated
     # by the style parameter
@@ -284,13 +296,6 @@ class MyGLMWrangler < GLMWrangler
     recs = recs.inject([]) {|new_recs, rec| new_recs << '' << rec}
 
     @lines.insert rec_i, *recs
-
-    # adjust EOLVolt multi-recorder file destinations
-    find_by_class('multi_recorder').each do |obj|
-      volt_match = /EOLVolt[1-9]\.csv/.match(obj[:file])
-      raise "I found a multi-recorder that doesn't appear to be an EOLVolt recorder" if volt_match.nil?
-      obj[:file] = file_base + volt_match[0]
-    end
   end
 
   def common_setup(region)
@@ -308,12 +313,12 @@ class MyGLMWrangler < GLMWrangler
 
   def setup_sc(region, penetration, options = {})
     common_setup region
-    setup_recorders :sc, region
     rerate_dist_xfmrs region, 'setup_sc_xfmr_rerate_log.csv'
     add_sc_solar region, penetration, options
     custom_load_pf
     adjust_regulator_setpoints 1.03
     sc_feeder_tweaks
+    setup_recorders :sc, region
     remove_extra_blanks_from_top_layer
   end
 
@@ -590,7 +595,7 @@ class MyGLMWrangler < GLMWrangler
       target.add_nested({
         :class => "ZIPload",
         :comment0 => comment,
-        :groupid => "SC_zipload_solar",
+        :groupid => SC_GROUPID,
         :base_power => base_power,
         :heatgain_fraction => '0.0',
         :power_pf => '1.0',
@@ -809,6 +814,9 @@ class MyGLMWrangler < GLMWrangler
     recs << fault_check(file_base)
   end
 
+  # Note that there is an assumption that this is called after the feeder is
+  # otherwise fully set up, as it conditionally sets up some recorders
+  # depending on whether the thing to be recorded is actually in the model
   def sc_recorders(file_base, interval, limit)
     recs = []
 
@@ -888,6 +896,37 @@ class MyGLMWrangler < GLMWrangler
       limit: limit,
       file: file_base + 'v_profile_12.csv'
     })
+
+    # Record total PV output, if there is any SC solar to record
+    if find_by_class('house').any? {|h| h.nested.any? {|n| n[:groupid] == SC_GROUPID }}
+      recs << new_obj({
+        class: 'collector',
+        group: "\"class=ZIPload AND groupid=#{SC_GROUPID}\"",
+        property: 'sum(actual_power.real)',
+        interval: MINUTE_INTERVAL,
+        limit: limit,
+        file: file_base + 'sc_gen.csv'
+      })
+    end
+
+    # Record capacitor switch states, if any
+    caps = find_by_class('capacitor')
+    unless caps.empty?
+
+      prop = caps.map do |cap|
+        PHASES.map do |ph|
+          "#{cap[:name]}:switch#{ph}"
+        end
+      end.flatten.join ','
+
+      recs << new_obj({
+        class: 'multi_recorder',
+        property: prop,
+        interval: interval,
+        limit: limit,
+        file: file_base + 'cap_switch.csv'
+      })
+    end
 
     recs << fault_check(file_base)
   end
