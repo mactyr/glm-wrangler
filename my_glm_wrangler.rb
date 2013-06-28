@@ -695,7 +695,7 @@ class MyGLMWrangler < GLMWrangler
   def sc_feeder_tweaks
     case @infilename
     when /R1_1247_1/
-      # noop
+      slice_clock
     when /R1_1247_2/
       # noop
     when /R1_1247_3/
