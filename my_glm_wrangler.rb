@@ -455,7 +455,7 @@ class MyGLMWrangler < GLMWrangler
           # in which case we want to tweak the primary voltage on the imported configuration
           # to match the local feeder's nominal voltage
           if new_config[:primary_voltage] != old_config[:primary_voltage]
-            puts "Adjusting primary voltage on #{new_config[:name]} from #{new_config[:primary_voltage]} to #{old_config[:primary_voltage]}"
+            #puts "Adjusting primary voltage on #{new_config[:name]} from #{new_config[:primary_voltage]} to #{old_config[:primary_voltage]}"
             new_config[:primary_voltage] = old_config[:primary_voltage]
           end
 
