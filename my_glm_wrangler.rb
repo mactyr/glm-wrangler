@@ -39,6 +39,7 @@ class MyGLMWrangler < GLMWrangler
   SHARED_DIR = File.join('..', 'shared')
   AGING_GROUPID = 'Aging_Trans'
   SC_GROUPID = 'SC_zipload_solar'
+  SC_CONTROL_MODE = 'SOLAR_CITY'
   DAY_INTERVAL = 60 * 60 * 24
   MINUTE_INTERVAL = 60
 
@@ -110,6 +111,10 @@ class MyGLMWrangler < GLMWrangler
   # :locations and :penetrations are pretty self-explanatory from the defaults
   # :use_feeders is a list of feeder IDs to use (default is all R1 & R3)
   # :skip_feeders is a list of IDs of any feeders to skip (e.g. 'R3_1247_3')
+  # :adjustments is a hash of adjustments to pass through to add_sc_solar_and_storage
+  # :test will prevent the models from actually being generated if set to
+  # something truthy
+  # :mpirun will parallelize the model generation using the mpirun shell command
   def self.sc_cluster_batch(options = {})
     # options are likely to be coming from the command line, so need to be parsed
     options = eval(options) if options.is_a? String
@@ -118,12 +123,13 @@ class MyGLMWrangler < GLMWrangler
       indir: '../sc_models/from_feeder_generator',
       outdir: '../sc_models',
       locations: %w[berkeley loyola sacramento],
-      penetrations: [0, 0.075, 0.15, 0.3, 0.5, 0.75, 1],
+      solar_pens: [0, 0.075, 0.15, 0.3, 0.5, 0.75, 1],
+      storage_pens: [0, 0.075, 0.15, 0.3, 0.5, 0.75, 1],
       use_feeders: %w[R1_1247_1 R1_1247_2 R1_1247_3 R1_1247_4 R1_2500_1 R1_1247_1 R3_1247_1 R3_1247_2 R3_1247_3],
       skip_feeders: []
     })
 
-    [:locations, :penetrations, :use_feeders, :skip_feeders].each do |opt|
+    [:locations, :solar_pens, :storage_pens, :use_feeders, :skip_feeders].each do |opt|
       options[opt] = options[opt].split if options[opt].is_a? String
     end
     locations = options[:locations].map {|r| r.downcase}
@@ -142,21 +148,37 @@ class MyGLMWrangler < GLMWrangler
       adj_str = '_unknown' if adj_str.empty?
     end
 
+    mpi_args = ''
+
     locations.each do |loc|
       # Berkeley uses climate region 1 loadings from Feeder_Generator.m,
       # our other two locations use region 3
       source_dir = File.join(options[:indir], "region_#{loc == 'berkeley' ? '1' : '3'}")
       feeders.each do |feeder|
         infile = Dir.glob(File.join(source_dir, "#{feeder}*#{EXT}")).first
-        options[:penetrations].each do |pen|
-          dest = File.join(options[:outdir], feeder)
-          Dir.mkdir(dest) unless File.exists?(dest)
-          dest_file = File.join(dest, "#{feeder}_sc#{'%03d' % (pen * 100)}_#{loc}#{adj_str}#{EXT}")
-          command = "setup_sc('#{loc}', #{pen}, #{options[:adjustments]})"
-          puts "Processing #{infile} -> #{dest_file} with: #{command}"
-          process(infile, dest_file, command) unless options[:test]
+        options[:solar_pens].each do |solar_pen|
+          options[:storage_pens].each do |storage_pen|
+            dest = File.join(options[:outdir], feeder)
+            Dir.mkdir(dest) unless File.exists?(dest)
+            dest_file = File.join(dest, "#{feeder}_sc#{'%03d' % (solar_pen * 100)}_st#{'%03d' % (storage_pen * 100)}_#{loc}#{adj_str}#{EXT}")
+            command = "setup_sc('#{loc}', #{solar_pen}, #{storage_pen}, #{options[:adjustments]})"
+            if options[:mpirun]
+              command = " -np 1 ruby #{__FILE__} #{infile} #{dest_file} \"#{command}\" :"
+              puts "Adding to mpi_args: #{command}"
+              mpi_args += command
+            else
+              puts "Processing #{infile} -> #{dest_file} with: #{command}"
+              process(infile, dest_file, command) unless options[:test]
+            end
+          end
         end
       end
+    end
+
+    if options[:mpirun]
+      final_command = "mpirun -tag-output #{mpi_args} > stdout.txt 2> stderr.txt"
+      puts "Executing: #{final_command}"
+      `#{final_command}` unless options[:test]
     end
   end
 
@@ -326,14 +348,15 @@ class MyGLMWrangler < GLMWrangler
     remove_extra_blanks_from_top_layer
   end
 
-  def setup_sc(region, penetration, options = {})
+  def setup_sc(region, solar_pen, storage_pen, options = {})
     common_setup region
     rerate_dist_xfmrs region, 'setup_sc_xfmr_rerate_log.csv'
-    add_sc_solar region, penetration, options
+    add_sc_solar_and_storage region, solar_pen, storage_pen, options
     custom_load_pf
     adjust_regulator_setpoints 1.03
     sc_feeder_tweaks
     setup_recorders :sc, region
+    add_generators_module if storage_pen && storage_pen > 0
     remove_extra_blanks_from_top_layer
   end
 
@@ -520,8 +543,9 @@ class MyGLMWrangler < GLMWrangler
   # Add Solar City generation profiles to the desired load_type until the
   # specified penetration fraction is reached.  peak_load is expected in kW.
   # Also add the players necessary to support each profile that's used.
-  def add_sc_solar(region, penetration, options = {})
-    return if penetration == 0
+  # Also add storage!
+  def add_sc_solar_and_storage(region, solar_pen, storage_pen = 0, options = {})
+    return if solar_pen == 0 && storage_pen == 0
     base_feeder_name = File.basename(@infilename)[0, 9]
     region.downcase!
 
@@ -566,15 +590,18 @@ class MyGLMWrangler < GLMWrangler
     rng = Random.new(1)
     targets = find_by_class('house').shuffle(random: rng)
 
-    # Place solar until we hit the desired penetration, and build players for
+    # Place solar until we hit the desired solar_pen, and build players for
     # all the profiles we use.  Note that we may overshoot the desired
-    # penetration by a fraction of an installation -- we don't try to match it
+    # solar_pen by a fraction of an installation -- we don't try to match it
     # exactly
-    placed = Hash.new 0
+    placed = {}
+    [:solar, :storage].each {|s| placed[s] = Hash.new(0)}
+    done = Hash.new
     players = {}
-    until placed[:res] + placed[:comm] >= peak_load * penetration do
+
+    begin
       target = targets.shift
-      raise "Ran out of targets to add solar to" if target.nil?
+      raise "Ran out of targets to add solar/storage to" if target.nil?
 
       unless options[:onemin]
         # Find the Solar City profile corresponding to this target's meter
@@ -584,14 +611,12 @@ class MyGLMWrangler < GLMWrangler
         profile_cap = capacities[profile]
       end
 
-      comment = "// Solar City PV generation rated at "
       base_power = "sc_gen_#{profile}.value"
 
       # Scale profile if it's not an appropriate size for the target "house".
       # This formula borrowed from PNNL's Feeder_Generator.m
       # The idea is that a reasonable guess for a rating for a system
       # is its area times 0.2 efficiency times 92.902W/sf peak insolation
-      # TODO: This may be too generous for residential; need to check
       potential_cap = target[:floor_area].to_i * 0.2 * 92.902 / 1000
       scale = (potential_cap / profile_cap).round(2)
       scale_down = scale < 1
@@ -599,47 +624,95 @@ class MyGLMWrangler < GLMWrangler
       # We always scale for commercial, but only scale down for residential
       # (undersized systems on residential are common in real life)
       if comm_res == :comm || scale_down
-        comment += "#{'%.1f' % potential_cap}kW (scaled #{scale_down ? 'down' : 'up'} from #{'%.1f' % profile_cap}kW)"
+        size_comment = "#{'%.1f' % potential_cap} kW (scaled #{scale_down ? 'down' : 'up'} from #{'%.1f' % profile_cap} kW)"
         base_power += "*#{scale}"
-        placed[comm_res] += potential_cap
+        capacity = potential_cap
       else
-        comment += "#{'%.1f' % profile_cap}kW"
-        placed[comm_res] += profile_cap
+        size_comment = "#{'%.1f' % profile_cap} kW"
+        capacity = profile_cap
       end
 
-      target.add_nested({
-        :class => "ZIPload",
-        :comment0 => comment,
-        :groupid => SC_GROUPID,
-        :base_power => base_power,
-        :heatgain_fraction => '0.0',
-        :power_pf => '1.0',
-        :current_pf => '1.0',
-        :impedance_pf => '1.0',
-        :impedance_fraction => '0.0',
-        :current_fraction => '0.0',
-        :power_fraction => '1.0'
-      })
+      # Add a solar site, or stop if we've hit our solar penetration target
+      if placed[:solar][:res] + placed[:solar][:comm] >= peak_load * solar_pen
+        done[:solar] = true
+      else
+        comment = "// SolarCity PV generation rated at #{size_comment}"
+
+        target.add_nested({
+          :class => "ZIPload",
+          :comment0 => comment,
+          :groupid => SC_GROUPID,
+          :base_power => base_power,
+          :heatgain_fraction => '0.0',
+          :power_pf => '1.0',
+          :current_pf => '1.0',
+          :impedance_pf => '1.0',
+          :impedance_fraction => '0.0',
+          :current_fraction => '0.0',
+          :power_fraction => '1.0'
+        })
+
+        unless players[profile]
+          player_props = {
+            :class => 'player',
+            :name => "sc_gen_#{profile}",
+            :file => File.join(SHARED_DIR, 'sc_gen', "sc_gen_#{profile}.csv")
+          }
+          players[profile] = new_obj player_props
+        end
+
+        placed[:solar][comm_res] += capacity
+      end # adding a solar site
+
+      # Add a storage site, or stop if we've hit our storage penetration target
+      if placed[:storage][:res] + placed[:storage][:comm] >= peak_load * storage_pen
+        done[:storage] = true
+      else
+        meter = target.upstream
+        unless meter[:class] == 'triplex_meter'
+          raise "Parent of #{target[:name]} was not a triplex_meter"
+        end
+        if old_inverter = meter.downstream.find {|obj| obj[:class] == 'inverter'}
+          # if there's already an inverter attached to this meter,
+          # that means this target house is part of a multi-house commercial
+          # unit under one meter. Rather than adding a second inverter
+          # (which would cause two or more inverters to compete to control
+          # the same meter demand) we "grow" the existing inverter.
+          # (Really, we delete the old one and replace it with a bigger new
+          # one because that's simpler.)
+          /rated at ([0-9.]+) kW.*([0-9]+) zones/.match old_inverter[:comment0]
+          new_cap = $1.to_f + capacity
+          zones = $2.to_i + 1
+          @lines.delete old_inverter
+          inverter = new_storage meter[:name], new_cap, zones
+        else
+          inverter = new_storage meter[:name], capacity
+        end
+
+        # insert the inverter into the file after the house
+        target_i = @lines.index target
+        @lines.insert target_i, '', inverter
+        placed[:storage][comm_res] += capacity
+      end # adding a storage site
       
-      unless players[profile]
-        player_props = {
-          :class => 'player',
-          :name => "sc_gen_#{profile}",
-          :file => File.join(SHARED_DIR, 'sc_gen', "sc_gen_#{profile}.csv")
-        }
-        players[profile] = new_obj player_props
-      end
-    end
+    end until done[:solar] && done[:storage]
     
     # insert the generated player objects after the last climate object in the file
     player_i = @lines.index(find_by_class('climate').last) + 1
     @lines.insert player_i, '', *players.values
 
-    # log how much solar was added at the end of the file
+    # log how much solar & storage was added at the end of the file
     @lines << ''
-    @lines << "// #{self.class}::#{__method__} added #{'%.1f' % placed[:res]}kW of residential solar"
-    @lines << "// and #{'%.1f' % placed[:comm]}kW of commercial solar for a total of #{'%.1f' % (placed[:res] + placed[:comm])}kW"
-    @lines << "// to reach a target penetration of #{'%.1f' % (penetration * 100)}% against a peak load of #{peak_load}kW"
+    @lines << "// #{self.class}::#{__method__} summary"
+    @lines << "// Baseline peak load: #{peak_load} kW"
+    @lines << "// Target solar penetration: #{'%.1f' % (solar_pen * 100)}%"
+    @lines << "// Residential solar: #{'%.1f' % placed[:solar][:res]} kW"
+    @lines << "// Commercial solar: #{'%.1f' % placed[:solar][:comm]} kW"
+    @lines << "// Total solar: #{'%.1f' % (placed[:solar][:res] + placed[:solar][:comm])} kW"
+    @lines << "// Target storage penetration: #{'%.1f' % (storage_pen * 100)}%"
+    @lines << "// Residential storage: #{'%.1f' % placed[:storage][:res]} kW"
+    @lines << "// Commercial storage: #{'%.1f' % placed[:storage][:comm]} kW"
+    @lines << "// Total storage: #{'%.1f' % (placed[:storage][:res] + placed[:storage][:comm])} kW"
   end
 
   # Change the power factor of all ZIPloads and house HVAC loads
@@ -910,6 +983,18 @@ class MyGLMWrangler < GLMWrangler
       })
     end
 
+    # Record aggregate SC storage stats, if there's any storage
+    unless find_by_four_quadrant_control_mode(SC_CONTROL_MODE).empty?
+      recs << new_obj({
+        class: 'collector',
+        group: "\"four_quadrant_control_mode=#{SC_CONTROL_MODE}\"",
+        property: 'sum(sc_dispatch_power),avg(battery_soc),std(battery_soc),min(battery_soc),max(battery_soc)',
+        interval: MINUTE_INTERVAL,
+        limit: limit,
+        file: file_base + 'sc_storage.csv'
+      })
+    end
+
     # Record capacitor switch states, if any
     caps = find_by_class('capacitor')
     unless caps.empty?
@@ -930,6 +1015,53 @@ class MyGLMWrangler < GLMWrangler
     end
 
     recs
+  end
+
+  def add_generators_module
+    tape_i = @lines.find_index {|l| l =~ /^module tape;/}
+    @lines.insert tape_i, 'module generators;'
+  end
+
+  # capacity is the power transfer capacity (not energy capacity)
+  def new_storage(meter_name, capacity, zones = 1)
+    rate = "#{'%.1f' % capacity} kW"
+    battery_cap = "#{'%.1f' % (2 * capacity)} kWh"
+    p_margin = capacity < 9 ? 0.25 * capacity : Math.sqrt(capacity) - 0.75
+    # Warning: it's hacky, but add_sc_solar_and_storage depends on the wording
+    # of the comment below; don't change it without checking there.
+    comment = "// SolarCity storage rated at #{rate} / #{battery_cap} covering #{zones} zones"
+
+    inverter = new_obj({
+      :class => 'inverter',
+      :comment0 => comment,
+      :name => "inv_#{meter_name}",
+      :inverter_type => 'FOUR_QUADRANT',
+      :four_quadrant_control_mode => SC_CONTROL_MODE,
+      :parent => meter_name,
+      :rated_power => "#{'%.1f' % (1.1 * capacity)} kW", # Per phase rating
+      :inverter_efficiency => '0.96',
+      :p_margin => "#{'%.1f' % p_margin} kW",
+      # this is a wild guess, but we don't really know anything about the load,
+      # just the solar system size. At worst, this value will only be used
+      # until the first start-of-month target update.
+      :p_target => "#{'%.1f' % (0.75 * capacity)} kW",
+      :max_discharge_rate => rate,
+      :max_charge_rate => rate,
+      :dT_runtime => '1 h'
+    })
+
+    inverter.add_nested({
+      :class => 'battery',
+      :name => "batt_#{meter_name}",
+      :use_internal_battery_model => 'TRUE',
+      :battery_type => 'LI_ION',
+      :battery_capacity => battery_cap,
+      :round_trip_efficiency => '0.9',
+      :state_of_charge => '1.0',
+      :generator_mode => 'SUPPLY_DRIVEN'
+    })
+
+    inverter
   end
 end
 
