@@ -170,6 +170,13 @@ class MyGLMWrangler < GLMWrangler
               puts "Processing #{infile} -> #{dest_file} with: #{command}"
               process(infile, dest_file, command) unless options[:test]
             end
+
+            result_dir = File.basename(dest_file, EXT)
+            unless File.exists?(result_dir)
+              puts "Creating result directory #{result_dir}"
+              Dir.mkdir result_dir
+            end
+
           end
         end
       end
@@ -178,7 +185,7 @@ class MyGLMWrangler < GLMWrangler
     if options[:mpirun]
       final_command = "mpirun -tag-output #{mpi_args} > stdout.txt 2> stderr.txt"
       puts "Executing: #{final_command}"
-      `#{final_command}` unless options[:test]
+      Kernel.exec(final_command) unless options[:test]
     end
   end
 
@@ -577,7 +584,7 @@ class MyGLMWrangler < GLMWrangler
       # In the hash, the key is the meter node's name and the value is the
       # profile (that is, inverter) ID
       profiles = {}
-      CSV.foreach(data_file("sc_match/#{base_feeder_name}_#{region}.csv"), headers: true) do |r|
+      CSV.foreach(data_file("sc_match/#{base_feeder_name}_#{region.capitalize}.csv"), headers: true) do |r|
         profiles[r['node']] = r['SGInverter'].to_i
       end
     end
@@ -987,7 +994,7 @@ class MyGLMWrangler < GLMWrangler
     unless find_by_four_quadrant_control_mode(SC_CONTROL_MODE).empty?
       recs << new_obj({
         class: 'collector',
-        group: "\"four_quadrant_control_mode=#{SC_CONTROL_MODE}\"",
+        group: "\"class=inverter\"",
         property: 'sum(sc_dispatch_power),avg(battery_soc),std(battery_soc),min(battery_soc),max(battery_soc)',
         interval: MINUTE_INTERVAL,
         limit: limit,
