@@ -603,6 +603,20 @@ class MyGLMWrangler < GLMWrangler
       target = targets.shift
       raise "Ran out of targets to add solar/storage to" if target.nil?
 
+      # This is a hack to fix a convergence problem with R3_1247_2 at load_48
+      # with region 1 loads (i.e. Berkeley runs) and high PV+storage penetrations.
+      # We're basically swapping in a load_2 stripmall for a load_48 stripmall
+      # of very similar size, because PV+storage at load_48 causes convergence errors.
+      if region == 'berkeley' && target[:name] == 'stripmallR3-12-47-2_load_48_A1'
+        target = find_by_name 'stripmallR3-12-47-2_load_2_A1', 1
+        # Make sure the swapped-in load_2 stripmall doesn't come up again
+        # as a target later on (I know it doesn't at penetrations <= 100%,
+        # because it happens to be late in the shuffled list of targets,
+        # but I'm being safe just in case we go to higher penetrations
+        # later on.)
+        raise "Couldn't remove swapped target from target list" if targets.delete(target).nil?
+      end
+
       unless options[:onemin]
         # Find the Solar City profile corresponding to this target's meter
         meter = target.location_meter
