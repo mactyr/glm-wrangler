@@ -170,13 +170,6 @@ class MyGLMWrangler < GLMWrangler
               puts "Processing #{infile} -> #{dest_file} with: #{command}"
               process(infile, dest_file, command) unless options[:test]
             end
-
-            result_dir = File.basename(dest_file, EXT)
-            unless File.exists?(result_dir)
-              puts "Creating result directory #{result_dir}"
-              Dir.mkdir result_dir
-            end
-
           end
         end
       end
@@ -827,7 +820,17 @@ class MyGLMWrangler < GLMWrangler
   end
 
   def write
-    clock_sliced? ? write_slices : super
+    result_dir = @outfilename.sub(GLMWrangler::EXT, '')
+    if clock_sliced?
+      write_slices
+      (1..@clock_slices).each do |slice_num|
+        slice_dir = "#{result_dir}_s#{slice_num}"
+        Dir.mkdir slice_dir unless File.exist? slice_dir
+      end
+    else
+      super
+      Dir.mkdir result_dir unless File.exist? result_dir
+    end
   end
 
   private
