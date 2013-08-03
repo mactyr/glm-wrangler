@@ -158,7 +158,7 @@ class MyGLMWrangler < GLMWrangler
         infile = Dir.glob(File.join(source_dir, "#{feeder}*#{EXT}")).first
         options[:solar_pens].each do |solar_pen|
           options[:storage_pens].each do |storage_pen|
-            dest = File.join(options[:outdir], feeder)
+            dest = options[:outdir]
             Dir.mkdir(dest) unless File.exists?(dest)
             dest_file = File.join(dest, "#{feeder}_sc#{'%03d' % (solar_pen * 100)}_st#{'%03d' % (storage_pen * 100)}_#{loc}#{adj_str}#{EXT}")
             command = "setup_sc('#{loc}', #{solar_pen}, #{storage_pen}, #{options[:adjustments]})"
