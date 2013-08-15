@@ -142,6 +142,7 @@ class MyGLMWrangler < GLMWrangler
         adj_str += '_onemin'
         adj_str += 'down' if options[:adjustments][:onemin] == :downsampled
       end
+      adj_str += '_stodebug' if options[:adjustments][:stodebug]
       # make sure the adjustments string says *something* if there were
       # any adjustments and the adjustments string is still blank,
       # to make sure we don't overwrite the base model names
@@ -355,7 +356,8 @@ class MyGLMWrangler < GLMWrangler
     custom_load_pf
     adjust_regulator_setpoints 1.03
     sc_feeder_tweaks
-    setup_recorders :sc, region
+    rec_style = options[:stodebug] ? :storage_debug : :sc
+    setup_recorders rec_style, region
     add_generators_module if storage_pen && storage_pen > 0
     remove_extra_blanks_from_top_layer
   end
@@ -1039,6 +1041,48 @@ class MyGLMWrangler < GLMWrangler
     end
 
     recs
+  end
+
+  def storage_debug_recorders(file_base, interval, limit)
+      recs = []
+
+      recs << new_obj({
+        class: 'group_recorder',
+        group: 'class=inverter',
+        property: "sc_dispatch_power",
+        interval: MINUTE_INTERVAL,
+        limit: limit,
+        file: file_base + 'sc_dispatch_power.csv'
+      })
+
+      recs << new_obj({
+        class: 'group_recorder',
+        group: 'class=inverter',
+        property: "p_target",
+        interval: MINUTE_INTERVAL,
+        limit: limit,
+        file: file_base + 'p_target.csv'
+      })
+
+      recs << new_obj({
+        class: 'group_recorder',
+        group: 'class=inverter',
+        property: "battery_soc",
+        interval: MINUTE_INTERVAL,
+        limit: limit,
+        file: file_base + 'battery_soc.csv'
+      })
+
+      recs << new_obj({
+        class: 'group_recorder',
+        group: 'class=triplex_meter',
+        property: "measured_real_power",
+        interval: MINUTE_INTERVAL,
+        limit: limit,
+        file: file_base + 'meter_p.csv'
+      })
+
+      recs
   end
 
   def add_generators_module
