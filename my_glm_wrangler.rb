@@ -1073,13 +1073,16 @@ class MyGLMWrangler < GLMWrangler
         file: file_base + 'battery_soc.csv'
       })
 
+      meter_prop = find_by_class('inverter').map do |inv|
+        "#{inv.upstream[:name]}:measured_real_power"
+      end.join ','
+
       recs << new_obj({
-        class: 'group_recorder',
-        group: 'class=triplex_meter',
-        property: "measured_real_power",
+        class: 'multi_recorder',
+        property: meter_prop,
         interval: MINUTE_INTERVAL,
         limit: limit,
-        file: file_base + 'meter_p.csv'
+        file: file_base + 'storage_meter_p.csv'
       })
 
       recs
