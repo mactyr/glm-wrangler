@@ -1134,6 +1134,19 @@ class MyGLMWrangler < GLMWrangler
 
     inverter
   end
+
+  # Intended for use with basic taxonomy feeders
+  # Reports total real power planning load for residential (triplex_node)
+  # vs. commercial/industrial/agricultural (load) loads in MW
+  # Note that the "to_f"s here (and within total_real_constant_power) will
+  # just take everything in the complex power value up to the "+"
+  # in other words, the real power.
+  def res_vs_comm_planning_load
+    res = find_by_class('triplex_node').inject(0.0) { |total, tn| total + tn[:power_12].to_f } / 1e6
+    comm = find_by_class('load').inject(0.0) { |total, l| total + l.total_real_constant_power } / 1e6
+    total = res + comm
+    puts "#{File.basename(@infilename, EXT)}: #{'%0.2f' % total} = #{'%0.2f' % res} (#{'%0.0f' % (res / total * 100)}%) + #{'%0.2f' % comm} (#{'%0.0f' % (comm / total * 100)}%)"
+  end
 end
 
 # Include this module for any GLMObject class that needs to be able to test
@@ -1261,6 +1274,12 @@ module GLMWrangler::GLMObject::House
     until u[:class][-5..-1] == 'meter' && u.real? do u = u.upstream; end
     raise "Hit the SWING node looking for #{self[:name]}'s location meter" if u[:bustype] == 'SWING'
     u
+  end
+end
+
+module GLMWrangler::GLMObject::Load
+  def total_real_constant_power
+    self[:constant_power_A].to_f + self[:constant_power_B].to_f + self[:constant_power_C].to_f
   end
 end
 
